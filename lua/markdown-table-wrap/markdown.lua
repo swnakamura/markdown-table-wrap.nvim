@@ -228,4 +228,63 @@ function M.apply_link_icons(cell, config)
   }
 end
 
+-- Map a 0-based byte offset in the raw cell text to the 0-based display-char
+-- index in the rendered cell text (inline markup collapsed, link icons
+-- applied). Walks the same segmentation as parse_inline over the FULL text,
+-- so concealed delimiters like ** map to the start/end of their value instead
+-- of drifting the way a naive prefix parse would.
+function M.source_to_display(text, src_off, config)
+  text = tostring(text or "")
+  src_off = math.max(0, math.min(src_off, #text))
+
+  local index = 1
+  local display_chars = 0
+
+  while index <= #text do
+    local match = earliest_match(text, index)
+
+    local plain_end = match and (match.start_col - 1) or #text
+    if plain_end >= index then
+      if src_off < plain_end then
+        return display_chars + vim.fn.strchars(text:sub(index, src_off))
+      end
+      display_chars = display_chars + vim.fn.strchars(text:sub(index, plain_end))
+    end
+
+    if not match then
+      break
+    end
+
+    local icon = ""
+    if match.kind == "link" or match.kind == "wiki_link" or match.kind == "image" then
+      icon = link_icon({ kind = match.kind, url = match.url }, config)
+    end
+    local icon_chars = vim.fn.strchars(icon)
+    local value = match.value or ""
+
+    if src_off < match.end_col then
+      -- Inside the markup construct: locate the value within the source
+      -- match; delimiters clamp to the value boundaries.
+      local segment = text:sub(match.start_col, match.end_col)
+      local inner = value ~= "" and segment:find(value, 1, true) or nil
+      if inner then
+        local inner_start = (match.start_col - 1) + (inner - 1)
+        local rel = src_off - inner_start
+        if rel <= 0 then
+          return display_chars + icon_chars
+        elseif rel >= #value then
+          return display_chars + icon_chars + vim.fn.strchars(value)
+        end
+        return display_chars + icon_chars + vim.fn.strchars(value:sub(1, rel))
+      end
+      return display_chars + icon_chars
+    end
+
+    display_chars = display_chars + icon_chars + vim.fn.strchars(value)
+    index = match.end_col + 1
+  end
+
+  return display_chars
+end
+
 return M

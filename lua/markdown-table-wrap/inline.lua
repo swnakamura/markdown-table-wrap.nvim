@@ -395,14 +395,20 @@ local function cursor_target(bufnr, row, col, entry)
     local wrapped = span and group.cells[cell_index] or nil
 
     if wrapped then
-      -- Cursor offset inside the source cell -> display-char index. For
-      -- plain text this is exact; markup prefixes are approximated (a
-      -- half-typed construct parses as literal text) and clamped below.
-      local offset = math.min(math.max(col - span.start_col, 0), span.end_col - span.start_col)
-      local raw_prefix = line:sub(span.start_col + 1, span.start_col + offset)
+      -- Cursor offset inside the source cell -> display-char index, mapped
+      -- through the full-cell inline parse so concealed delimiters like **
+      -- don't drift the position.
+      local raw_cell = line:sub(span.start_col + 1, span.end_col)
+      local offset = math.min(math.max(col - span.start_col, 0), #raw_cell)
+
+      -- The renderer sees escaped pipes unescaped (split_pipe_row applies
+      -- gsub("\\|", "|")); normalize the same way, shifting the offset by
+      -- the number of dropped backslashes before the cursor.
+      local _, escaped_before = raw_cell:sub(1, offset):gsub("\\|", "|")
+      local normalized = raw_cell:gsub("\\|", "|")
+
       local md = require("markdown-table-wrap.markdown")
-      local display_prefix = md.apply_link_icons(md.parse_inline(raw_prefix), entry.config).text
-      local t = vim.fn.strchars(display_prefix)
+      local t = md.source_to_display(normalized, offset - escaped_before, entry.config)
 
       local k = #wrapped
       for index, cell_line in ipairs(wrapped) do

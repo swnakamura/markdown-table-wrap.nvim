@@ -393,6 +393,72 @@ h.test("virtual cursor follows the wrapped rendered position", function()
   end)
 end)
 
+h.test("virtual cursor stays exact across concealed inline markup", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    debounce_ms = 0,
+    render_all = true,
+    auto_preview = true,
+    row_separator = true,
+  })
+
+  local marked_line = "| alpha | aa **bold** and `code` zz |"
+
+  h.with_buffer({
+    "| Name | Description |",
+    "| --- | --- |",
+    marked_line,
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    plugin.refresh_auto({ force = true })
+
+    local function cursor_char()
+      local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
+      for _, mark in ipairs(marks) do
+        local details = mark[4] or {}
+        for _, chunk in ipairs(details.virt_text or {}) do
+          if chunk[2] == "MarkdownTableWrapCursor" then
+            return chunk[1]
+          end
+        end
+        for _, virt_line in ipairs(details.virt_lines or {}) do
+          for _, chunk in ipairs(virt_line) do
+            if chunk[2] == "MarkdownTableWrapCursor" then
+              return chunk[1]
+            end
+          end
+        end
+      end
+      return nil
+    end
+
+    local function check_at(source_pattern, char_offset, expected)
+      local col = marked_line:find(source_pattern, 1, true) - 1 + char_offset
+      vim.api.nvim_win_set_cursor(0, { 3, col })
+      inline.update_cursor(buf)
+      h.assert_eq(
+        string.format("cursor at %s+%d shows %q", source_pattern, char_offset, expected),
+        cursor_char(),
+        expected
+      )
+    end
+
+    -- Inside the bold value: ** delimiters are concealed in the rendering
+    check_at("**bold**", 2, "b") -- on the 'b'
+    check_at("**bold**", 4, "l") -- on the 'l'
+    check_at("**bold**", 0, "b") -- on the opening delimiter -> clamps to value start
+    -- After the bold construct: no drift from the dropped delimiters
+    check_at(" and ", 1, "a")
+    check_at("zz", 0, "z")
+    -- Inside inline code (backticks concealed)
+    check_at("`code`", 1, "c")
+
+    inline.clear(buf)
+  end)
+end)
+
 h.test("table link opener uses source cell urls", function()
   local nav = require("markdown-table-wrap.nav")
   local opened = nil
