@@ -244,7 +244,7 @@ h.test("inline viewport toggle switches between sliced and full rendering", func
   end)
 end)
 
-h.test("extra inline virtual lines keep their original rendered line index", function()
+h.test("row-anchored lines keep their original rendered line index", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
 
@@ -269,21 +269,34 @@ h.test("extra inline virtual lines keep their original rendered line index", fun
 
     local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
     local member_b_chunks = nil
+    local member_b_row = nil
 
-    for _, mark in ipairs(marks) do
-      for _, virt_line in ipairs((mark[4] or {}).virt_lines or {}) do
-        local text = {}
-        for _, chunk in ipairs(virt_line) do
-          table.insert(text, chunk[1])
-        end
+    local function scan_chunks(chunks, row)
+      local text = {}
+      for _, chunk in ipairs(chunks) do
+        table.insert(text, chunk[1])
+      end
 
-        if table.concat(text):find("成员 B", 1, true) then
-          member_b_chunks = virt_line
-        end
+      if table.concat(text):find("成员 B", 1, true) then
+        member_b_chunks = chunks
+        member_b_row = row
       end
     end
 
-    h.assert_true("member B rendered as extra virtual line", member_b_chunks ~= nil)
+    for _, mark in ipairs(marks) do
+      local details = mark[4] or {}
+      if details.virt_text then
+        scan_chunks(details.virt_text, mark[2])
+      end
+      for _, virt_line in ipairs(details.virt_lines or {}) do
+        scan_chunks(virt_line, mark[2])
+      end
+    end
+
+    h.assert_true("member B is rendered", member_b_chunks ~= nil)
+    -- Row-anchored mode: member B is source line 5 (0-based row 4) and its
+    -- rendered first line must be anchored on that same source line.
+    h.assert_eq("member B anchored on its own source line", member_b_row, 4)
 
     local groups = {}
     for _, chunk in ipairs(member_b_chunks) do

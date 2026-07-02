@@ -256,7 +256,79 @@ local function view_offset(bufnr, table_info, source_count, rendered_count, conf
   return offset
 end
 
+-- Row-anchored replace mode: each source line shows the first visible line of
+-- its own rendered row, and that row's extra lines (wrapped continuations,
+-- separators, borders) hang below it as virtual lines. This keeps the cursor
+-- line and the rendered row visually in sync while editing.
+local function show_replace_aligned(bufnr, table_info, config, rendered)
+  set_render_for_buffer(bufnr, config)
+
+  local start_row = table_info.start_lnum - 1
+  local overlay_width = rendered.width
+  if config.overlay_fill then
+    overlay_width = vim.api.nvim_win_get_width(0)
+  end
+  local priority = config.overlay_priority or 10000
+  local line_index = 0 -- running index over the flattened rendered lines
+
+  for source_offset, group in ipairs(rendered.groups) do
+    local row = start_row + source_offset - 1
+    conceal_source_line(bufnr, row)
+
+    if group.leading and #group.leading > 0 then
+      local leading = {}
+      for _, line_obj in ipairs(group.leading) do
+        line_index = line_index + 1
+        table.insert(leading, chunks_from_line_object(line_obj, line_index))
+      end
+
+      vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
+        virt_lines = leading,
+        virt_lines_above = true,
+        right_gravity = false,
+        priority = priority,
+      })
+    end
+
+    line_index = line_index + 1
+    local mark = {
+      virt_text = padded_chunks(group.lines[1], line_index, overlay_width),
+      hl_mode = "replace",
+      right_gravity = false,
+      priority = priority,
+    }
+
+    if config.inline_virtual_text == "win_col" then
+      mark.virt_text_win_col = 0
+    else
+      mark.virt_text_pos = "overlay"
+    end
+
+    vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, mark)
+
+    if #group.lines > 1 then
+      local rest = {}
+      for index = 2, #group.lines do
+        line_index = line_index + 1
+        table.insert(rest, chunks_from_line_object(group.lines[index], line_index))
+      end
+
+      vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
+        virt_lines = rest,
+        virt_lines_above = false,
+        right_gravity = false,
+        priority = priority,
+      })
+    end
+  end
+end
+
 local function show_replace(bufnr, table_info, config, rendered)
+  local source_count = table_info.end_lnum - table_info.start_lnum + 1
+  if rendered.groups and #rendered.groups == source_count and not config.inline_viewport_scrolling then
+    return show_replace_aligned(bufnr, table_info, config, rendered)
+  end
+
   set_render_for_buffer(bufnr, config)
 
   local source_count = table_info.end_lnum - table_info.start_lnum + 1

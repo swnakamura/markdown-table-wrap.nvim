@@ -309,31 +309,54 @@ end
 function M.render_table(table_info, config)
   local chars = border_chars(config)
   local col_widths = distribute_widths(table_info, config)
-  local lines = {}
 
-  table.insert(lines, border_line(chars, chars.top_left, chars.top_join, chars.top_right, col_widths))
+  -- Group rendered lines per source line so inline replace mode can anchor
+  -- each source row to the first visible line of its rendered row.
+  -- groups[1] = header source line, groups[2] = separator source line,
+  -- groups[2 + i] = body row i.
+  local groups = {}
 
-  for _, line in ipairs(render_row(table_info.header, col_widths, table_info.align, chars, config)) do
-    table.insert(lines, line)
-  end
+  table.insert(groups, {
+    leading = { border_line(chars, chars.top_left, chars.top_join, chars.top_right, col_widths) },
+    lines = render_row(table_info.header, col_widths, table_info.align, chars, config),
+  })
 
-  table.insert(lines, border_line(chars, chars.mid_left, chars.mid_join, chars.mid_right, col_widths))
+  table.insert(groups, {
+    lines = { border_line(chars, chars.mid_left, chars.mid_join, chars.mid_right, col_widths) },
+  })
 
   for row_index, row in ipairs(table_info.rows) do
-    for _, line in ipairs(render_row(row, col_widths, table_info.align, chars, config)) do
-      table.insert(lines, line)
-    end
+    local group = { lines = render_row(row, col_widths, table_info.align, chars, config) }
 
     if config.row_separator and row_index < #table_info.rows then
-      table.insert(lines, row_separator_line(chars, col_widths))
+      table.insert(group.lines, row_separator_line(chars, col_widths))
     end
+
+    if row_index == #table_info.rows then
+      table.insert(group.lines, border_line(chars, chars.bottom_left, chars.bottom_join, chars.bottom_right, col_widths))
+    end
+
+    table.insert(groups, group)
   end
 
-  table.insert(lines, border_line(chars, chars.bottom_left, chars.bottom_join, chars.bottom_right, col_widths))
+  if #table_info.rows == 0 then
+    table.insert(groups[2].lines, border_line(chars, chars.bottom_left, chars.bottom_join, chars.bottom_right, col_widths))
+  end
+
+  local lines = {}
+  for _, group in ipairs(groups) do
+    for _, line in ipairs(group.leading or {}) do
+      table.insert(lines, line)
+    end
+    for _, line in ipairs(group.lines) do
+      table.insert(lines, line)
+    end
+  end
 
   return {
     lines = vim.tbl_map(text_of, lines),
     line_objects = lines,
+    groups = groups,
     width = table_width(col_widths),
     height = #lines,
     start_lnum = table_info.start_lnum,
