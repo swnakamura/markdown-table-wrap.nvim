@@ -26,6 +26,9 @@ local defaults = {
   inline_virtual_text = "overlay",
   inline_disable_wrap = true,
   inline_viewport_scrolling = false,
+  -- Hide the real cursor (guicursor blend) while the virtual cursor is shown
+  -- on a rendered table in normal mode.
+  inline_hide_cursor = true,
   highlight_preset = "default",
   theme_dir = nil,
   themes = {},
@@ -467,6 +470,10 @@ local function create_autocmds()
   vim.api.nvim_create_autocmd("ModeChanged", {
     group = M.state.augroup,
     callback = function()
+      -- Re-evaluate real/virtual cursor visibility for the new mode first;
+      -- update_cursor restores the real cursor whenever it should be visible.
+      require("markdown-table-wrap.inline").update_cursor(vim.api.nvim_get_current_buf())
+
       if not is_markdown_buffer() or M.config.clear_on_visual == false then
         return
       end
@@ -486,13 +493,18 @@ local function create_autocmds()
         M.state.visual_buffers[bufnr] = nil
         M.schedule_refresh({ silent = true })
       end
+
+      -- Re-evaluate real/virtual cursor visibility for the new mode
+      require("markdown-table-wrap.inline").update_cursor(bufnr)
     end,
   })
 
   vim.api.nvim_create_autocmd({ "WinEnter", "BufWinEnter" }, {
     group = M.state.augroup,
     callback = function(args)
-      require("markdown-table-wrap.inline").attach_window(args.buf)
+      local inline = require("markdown-table-wrap.inline")
+      inline.attach_window(args.buf)
+      inline.update_cursor(args.buf)
     end,
   })
 

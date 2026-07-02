@@ -459,6 +459,53 @@ h.test("virtual cursor stays exact across concealed inline markup", function()
   end)
 end)
 
+h.test("real cursor is hidden on rendered tables and restored outside", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    debounce_ms = 0,
+    render_all = true,
+    auto_preview = true,
+  })
+
+  local original_guicursor = vim.o.guicursor
+
+  h.with_buffer({
+    "| A | B |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+    "",
+    "plain text",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    plugin.refresh_auto({ force = true })
+
+    -- On a table row in normal mode: real cursor blended away
+    vim.api.nvim_win_set_cursor(0, { 3, 2 })
+    inline.update_cursor(buf)
+    h.assert_true(
+      "guicursor hides the real cursor on the table",
+      vim.o.guicursor:find("MarkdownTableWrapHiddenCursor", 1, true) ~= nil
+    )
+
+    -- Off the table: original guicursor restored
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+    inline.update_cursor(buf)
+    h.assert_eq("guicursor restored off the table", vim.o.guicursor, original_guicursor)
+
+    -- Back on the table, then clearing the rendering restores it too
+    vim.api.nvim_win_set_cursor(0, { 1, 2 })
+    inline.update_cursor(buf)
+    h.assert_true(
+      "guicursor hidden again on the table",
+      vim.o.guicursor:find("MarkdownTableWrapHiddenCursor", 1, true) ~= nil
+    )
+    inline.clear(buf)
+    h.assert_eq("guicursor restored after clear", vim.o.guicursor, original_guicursor)
+  end)
+end)
+
 h.test("table link opener uses source cell urls", function()
   local nav = require("markdown-table-wrap.nav")
   local opened = nil

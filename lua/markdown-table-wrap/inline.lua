@@ -445,12 +445,45 @@ local function cursor_target(bufnr, row, col, entry)
   return nil
 end
 
+-- The real cursor sits on the concealed source line, so its screen position
+-- never matches the rendered table. While the virtual cursor is shown in
+-- normal mode, hide the real one by blending it away (same guicursor trick
+-- noice.nvim uses); restore it the moment the cursor leaves the table or the
+-- mode changes.
+local real_cursor_hidden = false
+local saved_guicursor = nil
+
+local function hide_real_cursor()
+  if real_cursor_hidden then
+    return
+  end
+
+  real_cursor_hidden = true
+  vim.api.nvim_set_hl(0, "MarkdownTableWrapHiddenCursor", { blend = 100, nocombine = true })
+  saved_guicursor = vim.o.guicursor
+  local sep = saved_guicursor ~= "" and "," or ""
+  vim.o.guicursor = saved_guicursor .. sep .. "a:MarkdownTableWrapHiddenCursor/MarkdownTableWrapHiddenCursor"
+end
+
+local function show_real_cursor()
+  if not real_cursor_hidden then
+    return
+  end
+
+  real_cursor_hidden = false
+  if saved_guicursor ~= nil then
+    vim.o.guicursor = saved_guicursor
+    saved_guicursor = nil
+  end
+end
+
 -- Update the virtual cursor after real cursor movement. Cheap: re-renders at
 -- most two source rows (the one left and the one entered).
 function M.update_cursor(bufnr)
   bufnr = normalize_bufnr(bufnr)
   local rows = aligned_rows[bufnr]
   if not rows or vim.api.nvim_get_current_buf() ~= bufnr then
+    show_real_cursor()
     return
   end
 
@@ -459,6 +492,14 @@ function M.update_cursor(bufnr)
   local entry = rows[row]
   local target = entry and cursor_target(bufnr, row, cursor[2], entry) or nil
   local key = target and string.format("%d:%d:%d:%d", row, target.line, target.start_col, target.end_col) or nil
+
+  local config = entry and entry.config or {}
+  local mode = vim.api.nvim_get_mode().mode
+  if target and mode:match("^n") and config.inline_hide_cursor ~= false then
+    hide_real_cursor()
+  else
+    show_real_cursor()
+  end
 
   local previous = cursor_rows[bufnr]
   if previous and previous.key == key then
@@ -612,6 +653,9 @@ function M.clear(bufnr)
   active_configs[bufnr] = nil
   aligned_rows[bufnr] = nil
   cursor_rows[bufnr] = nil
+  if vim.api.nvim_get_current_buf() == bufnr then
+    show_real_cursor()
+  end
   restore_render_for_buffer(bufnr)
 end
 
