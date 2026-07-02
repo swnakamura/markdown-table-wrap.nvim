@@ -149,7 +149,7 @@ h.test("inline viewport scroll changes rendered table slice", function()
   end)
 end)
 
-h.test("inline replace can use overlay or fixed window column virtual text", function()
+h.test("row-anchored inline replace always uses fixed window column virtual text", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
 
@@ -178,9 +178,11 @@ h.test("inline replace can use overlay or fixed window column virtual text", fun
     })
     plugin.refresh_auto({ force = true })
 
+    -- Row-anchored replace mode forces win_col regardless of the option:
+    -- Neovim horizontally scrolls based on the raw cursor virtcol, which
+    -- would drag a text-anchored overlay off screen on long source lines.
     local overlay = first_virtual_text_mark(buf)
-    h.assert_eq("overlay render mode", overlay.virt_text_pos, "overlay")
-    h.assert_eq("overlay avoids fixed win col", overlay.virt_text_win_col, nil)
+    h.assert_eq("overlay option still renders window-fixed", overlay.virt_text_win_col, 0)
 
     inline.clear(buf)
     plugin.setup({
@@ -305,6 +307,87 @@ h.test("row-anchored lines keep their original rendered line index", function()
 
     h.assert_false("member B is not treated as table header", groups.MarkdownTableWrapHeader)
     h.assert_true("member B keeps normal inline highlight", groups.MarkdownTableWrapInline)
+
+    inline.clear(buf)
+  end)
+end)
+
+h.test("virtual cursor follows the wrapped rendered position", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    debounce_ms = 0,
+    render_all = true,
+    auto_preview = true,
+    row_separator = true,
+  })
+
+  local words = {}
+  for index = 1, 30 do
+    words[index] = string.format("word%02d", index)
+  end
+  local long_line = "| alpha | " .. table.concat(words, " ") .. " |"
+
+  h.with_buffer({
+    "| Name | Description |",
+    "| --- | --- |",
+    long_line,
+    "| beta | short |",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    plugin.refresh_auto({ force = true })
+
+    local function find_cursor_chunk()
+      local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
+      local found = nil
+      local count = 0
+
+      for _, mark in ipairs(marks) do
+        local details = mark[4] or {}
+        for _, chunk in ipairs(details.virt_text or {}) do
+          if chunk[2] == "MarkdownTableWrapCursor" then
+            count = count + 1
+            found = { row = mark[2], virt_line = 0, text = chunk[1] }
+          end
+        end
+        for line_index, virt_line in ipairs(details.virt_lines or {}) do
+          for _, chunk in ipairs(virt_line) do
+            if chunk[2] == "MarkdownTableWrapCursor" then
+              count = count + 1
+              found = { row = mark[2], virt_line = line_index, text = chunk[1] }
+            end
+          end
+        end
+      end
+
+      return found, count
+    end
+
+    -- Early word: rendered on the overlay (first visible line of the row)
+    vim.api.nvim_win_set_cursor(0, { 3, long_line:find("word01", 1, true) - 1 })
+    inline.update_cursor(buf)
+    local target = find_cursor_chunk()
+    h.assert_true("early word has a cursor chunk", target ~= nil)
+    h.assert_eq("early word row", target.row, 2)
+    h.assert_eq("early word stays on the overlay line", target.virt_line, 0)
+    h.assert_eq("early word highlights the cursor char", target.text, "w")
+
+    -- Late word: rendered on a wrapped continuation virtual line
+    vim.api.nvim_win_set_cursor(0, { 3, long_line:find("word25", 1, true) + 3 })
+    inline.update_cursor(buf)
+    target = find_cursor_chunk()
+    h.assert_true("late word has a cursor chunk", target ~= nil)
+    h.assert_true("late word lands on a continuation line", target.virt_line > 0)
+    h.assert_eq("late word highlights the cursor char", target.text, "2")
+
+    -- Moving to another row clears the previous virtual cursor
+    vim.api.nvim_win_set_cursor(0, { 4, 2 })
+    inline.update_cursor(buf)
+    local count
+    target, count = find_cursor_chunk()
+    h.assert_eq("only one cursor chunk after moving", count, 1)
+    h.assert_eq("cursor chunk follows to the new row", target.row, 3)
 
     inline.clear(buf)
   end)

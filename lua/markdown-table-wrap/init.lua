@@ -424,6 +424,9 @@ local function create_autocmds()
         return
       end
 
+      -- Keep the virtual cursor on the rendered (wrapped) table position
+      require("markdown-table-wrap.inline").update_cursor(args.buf)
+
       if M.config.render_all then
         return
       end

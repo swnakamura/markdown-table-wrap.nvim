@@ -280,6 +280,7 @@ local function render_row(row, col_widths, align, chars, config)
   for line_index = 1, height do
     local parts = { chars.vertical }
     local chunks = {}
+    local cells = {}
     local offset = #chars.vertical
 
     for col, col_width in ipairs(col_widths) do
@@ -293,6 +294,10 @@ local function render_row(row, col_widths, align, chars, config)
         content_offset = 1 + math.floor(math.max(0, col_width - width.strwidth(cell_text)) / 2)
       end
 
+      -- Byte offset in this rendered line where the cell content begins,
+      -- used to place the virtual cursor.
+      cells[col] = { byte_start = offset + content_offset }
+
       table.insert(parts, " " .. padded .. " ")
       add_cell_chunks(chunks, cell, offset + content_offset)
       offset = offset + #(" " .. padded .. " ")
@@ -300,10 +305,12 @@ local function render_row(row, col_widths, align, chars, config)
       offset = offset + #chars.vertical
     end
 
-    table.insert(lines, line_object(table.concat(parts), chunks))
+    local line = line_object(table.concat(parts), chunks)
+    line.cells = cells
+    table.insert(lines, line)
   end
 
-  return lines
+  return lines, wrapped
 end
 
 function M.render_table(table_info, config)
@@ -316,9 +323,11 @@ function M.render_table(table_info, config)
   -- groups[2 + i] = body row i.
   local groups = {}
 
+  local header_lines, header_cells = render_row(table_info.header, col_widths, table_info.align, chars, config)
   table.insert(groups, {
     leading = { border_line(chars, chars.top_left, chars.top_join, chars.top_right, col_widths) },
-    lines = render_row(table_info.header, col_widths, table_info.align, chars, config),
+    lines = header_lines,
+    cells = header_cells,
   })
 
   table.insert(groups, {
@@ -326,7 +335,8 @@ function M.render_table(table_info, config)
   })
 
   for row_index, row in ipairs(table_info.rows) do
-    local group = { lines = render_row(row, col_widths, table_info.align, chars, config) }
+    local row_lines, row_cells = render_row(row, col_widths, table_info.align, chars, config)
+    local group = { lines = row_lines, cells = row_cells }
 
     if config.row_separator and row_index < #table_info.rows then
       table.insert(group.lines, row_separator_line(chars, col_widths))

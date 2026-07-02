@@ -163,6 +163,10 @@ function M.spans(line)
   return cell_spans(line)
 end
 
+function M.cell_index(spans, col)
+  return current_cell_index(spans, col)
+end
+
 function M.current_cell_text()
   local cursor = vim.api.nvim_win_get_cursor(0)
   local row = cursor[1] - 1

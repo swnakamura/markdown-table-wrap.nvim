@@ -15,6 +15,7 @@ local presets = {
     wiki_link = { fg = "#bb9af7", underline = true },
     image = { fg = "#73daca" },
     blank = { link = "Normal" },
+    cursor = { reverse = true },
   },
   catppuccin = {
     border = { fg = "#89b4fa" },
@@ -30,6 +31,7 @@ local presets = {
     wiki_link = { fg = "#cba6f7", underline = true },
     image = { fg = "#94e2d5" },
     blank = { link = "Normal" },
+    cursor = { reverse = true },
   },
   default = {
     border = { link = "FloatBorder" },
@@ -45,6 +47,7 @@ local presets = {
     wiki_link = { link = "Underlined" },
     image = { link = "Special" },
     blank = { link = "Normal" },
+    cursor = { reverse = true },
   },
   render_markdown = {
     border = { link = "RenderMarkdownTableRow" },
@@ -60,6 +63,7 @@ local presets = {
     wiki_link = { link = "RenderMarkdownWikiLink" },
     image = { link = "RenderMarkdownImage" },
     blank = { link = "Normal" },
+    cursor = { reverse = true },
   },
 }
 
@@ -77,6 +81,7 @@ local groups = {
   wiki_link = "MarkdownTableWrapWikiLink",
   image = "MarkdownTableWrapImage",
   blank = "MarkdownTableWrapBlank",
+  cursor = "MarkdownTableWrapCursor",
 }
 
 local function detect_preset()
@@ -135,7 +140,9 @@ function M.apply(config)
   local overrides = config.highlights or {}
 
   for key, group in pairs(groups) do
-    local spec = vim.tbl_deep_extend("force", preset[key] or {}, overrides[key] or {})
+    -- Fall back to the default preset so custom themes missing newer keys
+    -- (e.g. cursor) don't end up with a cleared highlight group.
+    local spec = vim.tbl_deep_extend("force", preset[key] or presets.default[key] or {}, overrides[key] or {})
     vim.api.nvim_set_hl(0, group, normalize_spec(spec))
   end
 end

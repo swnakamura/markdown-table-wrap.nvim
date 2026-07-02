@@ -256,6 +256,220 @@ local function view_offset(bufnr, table_info, source_count, rendered_count, conf
   return offset
 end
 
+-- Row-anchored replace mode state: per buffer, per source row (0-based), the
+-- rendered group and its extmark ids, so the virtual cursor can re-render a
+-- single row without redrawing the whole table.
+local aligned_rows = {}
+local cursor_rows = {}
+
+-- Copy a rendered line and overlay a cursor highlight on byte range [s, e),
+-- splitting any existing styled chunks around it.
+local function inject_cursor_chunk(line_obj, s, e)
+  local text = type(line_obj) == "table" and line_obj.text or line_obj
+  local copy = { text = text, chunks = {} }
+
+  for _, chunk in ipairs(type(line_obj) == "table" and line_obj.chunks or {}) do
+    if chunk.end_col <= s or chunk.start_col >= e then
+      table.insert(copy.chunks, chunk)
+    else
+      if chunk.start_col < s then
+        table.insert(copy.chunks, { start_col = chunk.start_col, end_col = s, hl_group = chunk.hl_group })
+      end
+      if chunk.end_col > e then
+        table.insert(copy.chunks, { start_col = e, end_col = chunk.end_col, hl_group = chunk.hl_group })
+      end
+    end
+  end
+
+  table.insert(copy.chunks, { start_col = s, end_col = e, hl_group = "MarkdownTableWrapCursor" })
+  return copy
+end
+
+-- (Re-)set the extmarks of one row-anchored source row. cursor_pos is nil or
+-- { line = <index into group.lines>, start_col, end_col } for the virtual cursor.
+local function set_aligned_row_marks(bufnr, row, entry, cursor_pos)
+  for _, key in ipairs({ "leading_id", "overlay_id", "rest_id" }) do
+    if entry[key] then
+      vim.api.nvim_buf_del_extmark(bufnr, namespace, entry[key])
+      entry[key] = nil
+    end
+  end
+
+  local group = entry.group
+
+  if group.leading and #group.leading > 0 then
+    local leading = {}
+    for index, line_obj in ipairs(group.leading) do
+      table.insert(leading, chunks_from_line_object(line_obj, entry.leading_indexes[index]))
+    end
+
+    entry.leading_id = vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
+      virt_lines = leading,
+      virt_lines_above = true,
+      right_gravity = false,
+      priority = entry.priority,
+    })
+  end
+
+  local first = group.lines[1]
+  if cursor_pos and cursor_pos.line == 1 then
+    first = inject_cursor_chunk(first, cursor_pos.start_col, cursor_pos.end_col)
+  end
+
+  -- virt_text_win_col keeps the overlay window-fixed: Neovim horizontally
+  -- scrolls based on the raw (unconcealed) cursor virtcol, which would drag a
+  -- text-anchored overlay off screen whenever the cursor sits past the window
+  -- width on a long source line.
+  entry.overlay_id = vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
+    virt_text = padded_chunks(first, entry.line_indexes[1], entry.overlay_width),
+    hl_mode = "replace",
+    virt_text_win_col = 0,
+    right_gravity = false,
+    priority = entry.priority,
+  })
+
+  if #group.lines > 1 then
+    local rest = {}
+    for index = 2, #group.lines do
+      local line_obj = group.lines[index]
+      if cursor_pos and cursor_pos.line == index then
+        line_obj = inject_cursor_chunk(line_obj, cursor_pos.start_col, cursor_pos.end_col)
+      end
+      table.insert(rest, chunks_from_line_object(line_obj, entry.line_indexes[index]))
+    end
+
+    entry.rest_id = vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
+      virt_lines = rest,
+      virt_lines_above = false,
+      right_gravity = false,
+      priority = entry.priority,
+    })
+  end
+end
+
+local function iter_chars_with_bytes(text)
+  local index = 1
+  return function()
+    if index > #text then
+      return nil
+    end
+
+    local start_col, end_col = text:find("[%z\1-\127\194-\244][\128-\191]*", index)
+    if not start_col then
+      return nil
+    end
+
+    index = end_col + 1
+    return text:sub(start_col, end_col), start_col - 1, end_col
+  end
+end
+
+-- Byte range of the character covering display column target (0-based).
+local function char_at_display_col(text, target)
+  local acc = 0
+  local last_s, last_e = nil, nil
+
+  for ch, byte_s, byte_e in iter_chars_with_bytes(text) do
+    last_s, last_e = byte_s, byte_e
+    acc = acc + vim.api.nvim_strwidth(ch)
+    if acc > target then
+      return byte_s, byte_e
+    end
+  end
+
+  return last_s, last_e
+end
+
+-- Map the real cursor (source row/byte col) to the rendered position:
+-- which line of the group (wrapped rows push content down) and which byte
+-- range inside that rendered line.
+local function cursor_target(bufnr, row, col, entry)
+  local group = entry.group
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
+
+  if group.cells then
+    local nav = require("markdown-table-wrap.nav")
+    local spans = nav.spans(line)
+    local cell_index = nav.cell_index(spans, col)
+    local span = cell_index and spans[cell_index] or nil
+    local wrapped = span and group.cells[cell_index] or nil
+
+    if wrapped then
+      -- Cursor offset inside the source cell -> display-char index. For
+      -- plain text this is exact; markup prefixes are approximated (a
+      -- half-typed construct parses as literal text) and clamped below.
+      local offset = math.min(math.max(col - span.start_col, 0), span.end_col - span.start_col)
+      local raw_prefix = line:sub(span.start_col + 1, span.start_col + offset)
+      local md = require("markdown-table-wrap.markdown")
+      local display_prefix = md.apply_link_icons(md.parse_inline(raw_prefix), entry.config).text
+      local t = vim.fn.strchars(display_prefix)
+
+      local k = #wrapped
+      for index, cell_line in ipairs(wrapped) do
+        if t < (cell_line.char_end or 0) then
+          k = index
+          break
+        end
+      end
+
+      local cell_line = wrapped[k]
+      local nchars = vim.fn.strchars(cell_line.text)
+      local within = math.min(math.max(t - (cell_line.char_start or 0), 0), nchars)
+      local byte_s = #vim.fn.strcharpart(cell_line.text, 0, within)
+      -- within == nchars: cursor sits on the padding space after the text
+      -- (the rendered line always has at least one space before the border).
+      local byte_e = within < nchars and (byte_s + #vim.fn.strcharpart(cell_line.text, within, 1)) or (byte_s + 1)
+
+      local layout = group.lines[k] and group.lines[k].cells and group.lines[k].cells[cell_index] or nil
+      if layout then
+        return { line = k, start_col = layout.byte_start + byte_s, end_col = layout.byte_start + byte_e }
+      end
+    end
+  end
+
+  -- Separator line (or fallback): map by display column onto the first
+  -- rendered line, clamped to the table width.
+  local first_text = type(group.lines[1]) == "table" and group.lines[1].text or group.lines[1]
+  local target = vim.api.nvim_strwidth(line:sub(1, col))
+  local byte_s, byte_e = char_at_display_col(first_text, target)
+  if byte_s then
+    return { line = 1, start_col = byte_s, end_col = byte_e }
+  end
+
+  return nil
+end
+
+-- Update the virtual cursor after real cursor movement. Cheap: re-renders at
+-- most two source rows (the one left and the one entered).
+function M.update_cursor(bufnr)
+  bufnr = normalize_bufnr(bufnr)
+  local rows = aligned_rows[bufnr]
+  if not rows or vim.api.nvim_get_current_buf() ~= bufnr then
+    return
+  end
+
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local row = cursor[1] - 1
+  local entry = rows[row]
+  local target = entry and cursor_target(bufnr, row, cursor[2], entry) or nil
+  local key = target and string.format("%d:%d:%d:%d", row, target.line, target.start_col, target.end_col) or nil
+
+  local previous = cursor_rows[bufnr]
+  if previous and previous.key == key then
+    return
+  end
+
+  if previous and previous.row ~= row and rows[previous.row] then
+    set_aligned_row_marks(bufnr, previous.row, rows[previous.row], nil)
+  end
+
+  if entry then
+    set_aligned_row_marks(bufnr, row, entry, target)
+  end
+
+  cursor_rows[bufnr] = key and { row = row, key = key } or nil
+end
+
 -- Row-anchored replace mode: each source line shows the first visible line of
 -- its own rendered row, and that row's extra lines (wrapped continuations,
 -- separators, borders) hang below it as virtual lines. This keeps the cursor
@@ -271,55 +485,35 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
   local priority = config.overlay_priority or 10000
   local line_index = 0 -- running index over the flattened rendered lines
 
+  aligned_rows[bufnr] = aligned_rows[bufnr] or {}
+
   for source_offset, group in ipairs(rendered.groups) do
     local row = start_row + source_offset - 1
     conceal_source_line(bufnr, row)
 
-    if group.leading and #group.leading > 0 then
-      local leading = {}
-      for _, line_obj in ipairs(group.leading) do
-        line_index = line_index + 1
-        table.insert(leading, chunks_from_line_object(line_obj, line_index))
-      end
-
-      vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
-        virt_lines = leading,
-        virt_lines_above = true,
-        right_gravity = false,
-        priority = priority,
-      })
+    local leading_indexes = {}
+    for _ in ipairs(group.leading or {}) do
+      line_index = line_index + 1
+      table.insert(leading_indexes, line_index)
     end
 
-    line_index = line_index + 1
-    local mark = {
-      virt_text = padded_chunks(group.lines[1], line_index, overlay_width),
-      hl_mode = "replace",
-      right_gravity = false,
+    local line_indexes = {}
+    for _ in ipairs(group.lines) do
+      line_index = line_index + 1
+      table.insert(line_indexes, line_index)
+    end
+
+    local entry = {
+      group = group,
+      config = config,
+      overlay_width = overlay_width,
       priority = priority,
+      leading_indexes = leading_indexes,
+      line_indexes = line_indexes,
     }
 
-    if config.inline_virtual_text == "win_col" then
-      mark.virt_text_win_col = 0
-    else
-      mark.virt_text_pos = "overlay"
-    end
-
-    vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, mark)
-
-    if #group.lines > 1 then
-      local rest = {}
-      for index = 2, #group.lines do
-        line_index = line_index + 1
-        table.insert(rest, chunks_from_line_object(group.lines[index], line_index))
-      end
-
-      vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
-        virt_lines = rest,
-        virt_lines_above = false,
-        right_gravity = false,
-        priority = priority,
-      })
-    end
+    aligned_rows[bufnr][row] = entry
+    set_aligned_row_marks(bufnr, row, entry, nil)
   end
 end
 
@@ -410,6 +604,8 @@ function M.clear(bufnr)
   active_buffers[bufnr] = nil
   active_tables[bufnr] = nil
   active_configs[bufnr] = nil
+  aligned_rows[bufnr] = nil
+  cursor_rows[bufnr] = nil
   restore_render_for_buffer(bufnr)
 end
 
@@ -448,6 +644,7 @@ function M.show(bufnr, table_info, config)
   active_buffers[bufnr] = true
   active_tables[bufnr] = { table_info }
   active_configs[bufnr] = config
+  M.update_cursor(bufnr)
   return rendered
 end
 
@@ -463,6 +660,7 @@ function M.show_many(bufnr, tables, config)
   active_buffers[bufnr] = #tables > 0
   active_tables[bufnr] = tables
   active_configs[bufnr] = config
+  M.update_cursor(bufnr)
   return rendered
 end
 

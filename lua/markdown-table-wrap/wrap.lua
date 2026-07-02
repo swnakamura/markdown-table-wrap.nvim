@@ -59,6 +59,14 @@ local function styled_chars(cell)
     end
   end
 
+  -- Record each item's display-char offset within the whole cell text so
+  -- wrapped lines can be mapped back to cell character positions.
+  local offset = 0
+  for _, item in ipairs(coalesced) do
+    item.char_offset = offset
+    offset = offset + vim.fn.strchars(item.text)
+  end
+
   return coalesced
 end
 
@@ -95,9 +103,15 @@ local function line_from_chars(chars)
 
   close_span()
 
+  local last = chars[#chars]
+
   return {
     text = table.concat(text):gsub("%s+$", ""),
     spans = spans,
+    -- Display-char range of this wrapped line within the whole cell text
+    -- (before trailing-whitespace trim), used to locate the cursor.
+    char_start = chars[1] and chars[1].char_offset or 0,
+    char_end = last and (last.char_offset + vim.fn.strchars(last.text)) or 0,
   }
 end
 
@@ -142,7 +156,7 @@ end
 
 function M.wrap_cell(cell, limit)
   if limit <= 0 or width.strwidth(cell) == 0 then
-    return { { text = "", spans = {} } }
+    return { { text = "", spans = {}, char_start = 0, char_end = 0 } }
   end
 
   local lines = {}
@@ -160,7 +174,7 @@ function M.wrap_cell(cell, limit)
   wrap_segment(segment, limit, lines)
 
   if #lines == 0 then
-    return { { text = "", spans = {} } }
+    return { { text = "", spans = {}, char_start = 0, char_end = 0 } }
   end
 
   return lines
