@@ -54,15 +54,25 @@ function M.with_buffer(lines, fn)
   end
 end
 
+-- Headless output from vim.notify, :write and friends arrives without a
+-- trailing newline, so a bare print() lands on the same screen line as
+-- whatever came before it and stops matching a "^FAIL" grep. Every result
+-- line therefore opens its own line.
+local function report(line)
+  print("\n" .. line)
+end
+
 function M.finish()
   if #M.failures > 0 then
     for _, failure in ipairs(M.failures) do
-      print("FAIL " .. failure)
+      report("FAIL " .. failure)
     end
+    report(string.format("FAILED %d assertions in %d tests", #M.failures, M.count))
+    -- Non-zero exit, so the acceptance command and CI see a red run.
     vim.cmd("cquit")
   end
 
-  print(string.format("PASS %d tests", M.count))
+  report(string.format("PASS %d tests", M.count))
 end
 
 return M
