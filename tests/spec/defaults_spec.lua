@@ -407,6 +407,112 @@ h.test("default setup keeps the table screen height constant across the cursor r
   end)
 end)
 
+h.test("toggling the reader off returns to the default inline rendering", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+  local reader = require("markdown-table-wrap.reader")
+
+  plugin.setup({})
+
+  h.with_buffer(table_lines, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+    plugin.refresh_auto()
+    h.assert_true("inline rendering is active to begin with", inline.is_active(buf))
+
+    local reader_buf = plugin.toggle_reader()
+    h.assert_true("the reader opens on the first toggle", reader.is_reader(reader_buf))
+
+    h.assert_true("the reader closes on the second toggle", plugin.toggle_reader())
+    h.assert_eq("the source buffer is current again", vim.api.nvim_get_current_buf(), buf)
+    h.assert_false("the source is not left paused", plugin.state.paused_buffers[buf] == true)
+    h.assert_eq("the buffer returns to the configured mode", plugin.get_preview_mode(buf), "inline")
+
+    -- The round trip must actually restore the rendering, both by itself and
+    -- through the ordinary refresh path that a cursor move, scroll, or edit
+    -- goes through.
+    vim.wait(400, function()
+      return inline.is_active(buf)
+    end)
+    h.assert_true("the round trip re-renders the buffer", inline.is_active(buf))
+
+    inline.clear(buf)
+    plugin.refresh_auto()
+    h.assert_true("an ordinary refresh still renders the buffer", inline.is_active(buf))
+
+    inline.clear(buf)
+    plugin.state.inline_buf = nil
+  end)
+end)
+
+h.test("an unfocused window keeps the options its rendering depends on", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({})
+  h.assert_true("whole-buffer rendering is on by default", plugin.config.render_all)
+
+  local markdown_buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[markdown_buf].buftype = "nofile"
+  vim.bo[markdown_buf].swapfile = false
+  vim.api.nvim_buf_set_lines(markdown_buf, 0, -1, false, table_lines)
+  vim.bo[markdown_buf].filetype = "markdown"
+
+  local plain_buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[plain_buf].buftype = "nofile"
+  vim.bo[plain_buf].swapfile = false
+  vim.api.nvim_buf_set_lines(plain_buf, 0, -1, false, { "plain text" })
+
+  local plain_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(plain_win, plain_buf)
+  vim.cmd("vsplit")
+  local markdown_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(markdown_win, markdown_buf)
+  -- A conceallevel the user or an ftplugin already had in place: it is what
+  -- gets handed back when the window is wrongly detached on leave.
+  vim.wo[markdown_win].conceallevel = 1
+  vim.api.nvim_win_set_cursor(markdown_win, { 1, 0 })
+  plugin.refresh_auto({ force = true })
+
+  local function height()
+    return vim.api.nvim_win_call(markdown_win, function()
+      return vim.api.nvim_win_text_height(markdown_win, {}).all
+    end)
+  end
+  local function extmarks()
+    return #vim.api.nvim_buf_get_extmarks(markdown_buf, inline.namespace(), 0, -1, {})
+  end
+
+  h.assert_true("the markdown window is rendered", inline.is_active(markdown_buf))
+  local focused_conceallevel = vim.wo[markdown_win].conceallevel
+  local focused_height = height()
+  local focused_extmarks = extmarks()
+  h.assert_eq("rendering raises conceallevel while focused", focused_conceallevel, 2)
+
+  -- Focus away. The rendered blocks stay attached (render_all), so the window
+  -- must keep the conceallevel that hides the source rows underneath them.
+  vim.api.nvim_set_current_win(plain_win)
+  h.assert_eq("the rendering stays attached after leaving", extmarks(), focused_extmarks)
+  h.assert_eq("leaving keeps conceallevel", vim.wo[markdown_win].conceallevel, focused_conceallevel)
+  h.assert_eq("leaving keeps the buffer screen height", height(), focused_height)
+
+  -- And it never self-heals on its own, so a second round trip must be stable
+  -- rather than merely repaired by refocusing.
+  vim.api.nvim_set_current_win(markdown_win)
+  h.assert_eq("refocusing keeps conceallevel", vim.wo[markdown_win].conceallevel, focused_conceallevel)
+  h.assert_eq("refocusing keeps the buffer screen height", height(), focused_height)
+  vim.api.nvim_set_current_win(plain_win)
+  h.assert_eq("leaving again keeps conceallevel", vim.wo[markdown_win].conceallevel, focused_conceallevel)
+  h.assert_eq("leaving again keeps the buffer screen height", height(), focused_height)
+
+  inline.dispose(markdown_buf)
+  if vim.api.nvim_win_is_valid(markdown_win) then
+    vim.api.nvim_win_close(markdown_win, true)
+  end
+  vim.api.nvim_buf_delete(markdown_buf, { force = true })
+  vim.api.nvim_buf_delete(plain_buf, { force = true })
+end)
+
 h.test("default setup leaves 'wrap' and 'concealcursor' alone", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")

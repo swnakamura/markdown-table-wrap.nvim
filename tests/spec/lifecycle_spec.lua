@@ -147,7 +147,14 @@ h.test("leaving an inline window or buffer restores its local options", function
   plugin.setup({
     auto_preview = false,
     preview_mode = "inline",
-    render_all = true,
+    -- Leaving the window hands its options back only when the rendering is
+    -- released with it, which is render_all = false plus the default
+    -- clear_on_cursor_leave. While the rendered blocks stay attached -- under
+    -- render_all, or with clear_on_cursor_leave = false -- the window has to
+    -- keep the options they depend on; that is covered by
+    -- "an unfocused window keeps the options its rendering depends on" and
+    -- "a window that keeps its rendering on leave keeps its options".
+    render_all = false,
     -- Opt in: 'wrap' and 'concealcursor' are left alone by default.
     inline_disable_wrap = true,
     inline_wrap_scope = "always",
@@ -178,11 +185,161 @@ h.test("leaving an inline window or buffer restores its local options", function
   h.assert_eq("WinLeave restores concealcursor", vim.wo[win_a].concealcursor, "")
 
   vim.api.nvim_set_current_win(win_a)
-  h.assert_false("WinEnter reapplies inline wrap", vim.wo[win_a].wrap)
   vim.api.nvim_win_set_buf(win_a, buf_b)
   h.assert_true("BufLeave restores wrap", vim.wo[win_a].wrap)
   h.assert_eq("BufLeave restores conceallevel", vim.wo[win_a].conceallevel, 0)
   h.assert_eq("BufLeave restores concealcursor", vim.wo[win_a].concealcursor, "")
+
+  inline.dispose(buf_a)
+  if vim.api.nvim_win_is_valid(win_b) then
+    vim.api.nvim_win_close(win_b, true)
+  end
+  delete_buffer(buf_a)
+  delete_buffer(buf_b)
+end)
+
+h.test("a window that newly shows a rendered buffer picks up its options", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    auto_preview = false,
+    preview_mode = "inline",
+    render_all = true,
+    -- Opt in: 'wrap' and 'concealcursor' are left alone by default.
+    inline_disable_wrap = true,
+    inline_wrap_scope = "always",
+    debounce_ms = 0,
+  })
+
+  local win_a = vim.api.nvim_get_current_win()
+  local buf_a = new_markdown_buffer(table_lines)
+  vim.api.nvim_win_set_buf(win_a, buf_a)
+  vim.cmd("vsplit")
+  local win_b = vim.api.nvim_get_current_win()
+  local buf_b = new_markdown_buffer({ "plain text" })
+  vim.api.nvim_win_set_buf(win_b, buf_b)
+
+  vim.api.nvim_set_current_win(win_a)
+  plugin.refresh_auto({ bufnr = buf_a, winid = win_a, force = true })
+  h.assert_false("the rendering applies to the window it was made in", vim.wo[win_a].wrap)
+
+  -- A second window that had none of the inline options now shows the
+  -- rendered buffer: displaying it there has to apply them too. This is the
+  -- BufWinEnter half of the attach autocommand; the WinEnter half is covered
+  -- by the focus-change test below.
+  vim.api.nvim_set_current_win(win_b)
+  vim.wo[win_b].wrap = true
+  vim.wo[win_b].conceallevel = 0
+  vim.wo[win_b].concealcursor = ""
+  vim.api.nvim_win_set_buf(win_b, buf_a)
+
+  h.assert_false("BufWinEnter reapplies inline wrap", vim.wo[win_b].wrap)
+  h.assert_eq("BufWinEnter reapplies inline conceallevel", vim.wo[win_b].conceallevel, 2)
+  h.assert_eq("BufWinEnter reapplies inline concealcursor", vim.wo[win_b].concealcursor, "nvc")
+
+  inline.dispose(buf_a)
+  if vim.api.nvim_win_is_valid(win_b) then
+    vim.api.nvim_win_close(win_b, true)
+  end
+  delete_buffer(buf_a)
+  delete_buffer(buf_b)
+end)
+
+h.test("focusing a window back onto its rendering reapplies its options", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    auto_preview = false,
+    preview_mode = "inline",
+    render_all = true,
+    -- Opt in: 'wrap' and 'concealcursor' are left alone by default.
+    inline_disable_wrap = true,
+    inline_wrap_scope = "always",
+    debounce_ms = 0,
+  })
+
+  local win_a = vim.api.nvim_get_current_win()
+  local buf_a = new_markdown_buffer(table_lines)
+  vim.api.nvim_win_set_buf(win_a, buf_a)
+  -- Both windows already hold the rendered buffer, so nothing below changes
+  -- which buffer a window shows: the only trigger left is the focus change,
+  -- which is WinEnter and never BufWinEnter.
+  vim.cmd("vsplit")
+  local win_b = vim.api.nvim_get_current_win()
+
+  vim.api.nvim_set_current_win(win_a)
+  plugin.refresh_auto({ bufnr = buf_a, winid = win_a, force = true })
+  h.assert_true("both windows show the rendered buffer", vim.api.nvim_win_get_buf(win_b) == buf_a)
+  h.assert_true("the rendering is active", inline.is_active(buf_a))
+
+  -- Something else took the options off the unfocused window: a :set, an
+  -- ftplugin, another plugin. Focusing it has to put them back.
+  vim.wo[win_b].wrap = true
+  vim.wo[win_b].conceallevel = 0
+  vim.wo[win_b].concealcursor = ""
+
+  vim.api.nvim_set_current_win(win_b)
+  h.assert_eq("focus alone did not change the displayed buffer", vim.api.nvim_win_get_buf(win_b), buf_a)
+  h.assert_false("WinEnter reapplies inline wrap", vim.wo[win_b].wrap)
+  h.assert_eq("WinEnter reapplies inline conceallevel", vim.wo[win_b].conceallevel, 2)
+  h.assert_eq("WinEnter reapplies inline concealcursor", vim.wo[win_b].concealcursor, "nvc")
+
+  inline.dispose(buf_a)
+  if vim.api.nvim_win_is_valid(win_b) then
+    vim.api.nvim_win_close(win_b, true)
+  end
+  delete_buffer(buf_a)
+end)
+
+h.test("a window that keeps its rendering on leave keeps its options", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  -- The combination that releases nothing on leave: only the table under the
+  -- cursor is rendered, and leaving does not clear it.
+  plugin.setup({
+    auto_preview = false,
+    preview_mode = "inline",
+    render_all = false,
+    clear_on_cursor_leave = false,
+    debounce_ms = 0,
+  })
+
+  local win_a = vim.api.nvim_get_current_win()
+  local buf_a = new_markdown_buffer(table_lines)
+  vim.api.nvim_win_set_buf(win_a, buf_a)
+  vim.cmd("vsplit")
+  local win_b = vim.api.nvim_get_current_win()
+  local buf_b = new_markdown_buffer({ "plain text" })
+  vim.api.nvim_win_set_buf(win_b, buf_b)
+
+  vim.wo[win_a].conceallevel = 1
+  vim.api.nvim_set_current_win(win_a)
+  vim.api.nvim_win_set_cursor(win_a, { 1, 0 })
+  plugin.refresh_auto({ bufnr = buf_a, winid = win_a, force = true })
+
+  local function extmarks()
+    return #vim.api.nvim_buf_get_extmarks(buf_a, inline.namespace(), 0, -1, {})
+  end
+  local function height()
+    return vim.api.nvim_win_call(win_a, function()
+      return vim.api.nvim_win_text_height(win_a, {}).all
+    end)
+  end
+
+  h.assert_true("the table is rendered", inline.is_active(buf_a))
+  h.assert_eq("rendering raises conceallevel", vim.wo[win_a].conceallevel, 2)
+  local rendered_extmarks = extmarks()
+  local rendered_height = height()
+  h.assert_true("the rendering left extmarks", rendered_extmarks > 0)
+
+  vim.api.nvim_set_current_win(win_b)
+  h.assert_true("leaving keeps the rendering attached", inline.is_active(buf_a))
+  h.assert_eq("leaving keeps the extmarks", extmarks(), rendered_extmarks)
+  h.assert_eq("leaving keeps conceallevel", vim.wo[win_a].conceallevel, 2)
+  h.assert_eq("leaving keeps the buffer screen height", height(), rendered_height)
 
   inline.dispose(buf_a)
   if vim.api.nvim_win_is_valid(win_b) then

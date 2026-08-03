@@ -99,6 +99,10 @@ M.state = {
   paused_buffers = {},
   auto_buffers = {},
   buffer_modes = {},
+  -- Per-buffer preview mode that was in force before an explicit Reader was
+  -- opened, so closing it can hand the buffer back its own choice instead of
+  -- the global one. `false` records "there was no override".
+  pre_reader_modes = {},
   inline_viewports = {},
   gx_fallbacks = {},
   gx_installed = {},
@@ -538,6 +542,11 @@ function M.reader_preview(opts)
   end
 
   if not opts.auto then
+    -- Remember what this buffer was set to, so closing the Reader restores it
+    -- rather than dropping the buffer onto the global mode.
+    if M.state.buffer_modes[bufnr] ~= "reader" then
+      M.state.pre_reader_modes[bufnr] = M.state.buffer_modes[bufnr] or false
+    end
     M.state.buffer_modes[bufnr] = "reader"
   end
 
@@ -555,6 +564,45 @@ function M.pause_buffer(bufnr)
   M.state.last_signature[bufnr] = nil
 end
 
+-- A Reader has gone away: put its source buffer back on the mode it was on
+-- before the Reader was opened -- its own override when it had one, the
+-- global mode otherwise -- and decide whether rendering resumes there.
+-- Reading the mode only makes sense after the override is undone, since it is
+-- still "reader" until then.
+--
+-- Used both by close_reader() and by the BufWipeout teardown, so deleting a
+-- Reader buffer leaves the source in the same state as closing it properly.
+local function release_reader_mode(source_bufnr)
+  if not source_bufnr then
+    return
+  end
+
+  local previous = M.state.pre_reader_modes[source_bufnr]
+  if previous ~= nil then
+    M.state.buffer_modes[source_bufnr] = previous or nil
+    M.state.pre_reader_modes[source_bufnr] = nil
+  elseif M.state.buffer_modes[source_bufnr] == "reader" then
+    M.state.buffer_modes[source_bufnr] = nil
+  end
+
+  if preview_mode_for(source_bufnr) == "reader" then
+    -- Reader is what this buffer is configured for, so an automatic refresh
+    -- would reopen it straight away. Pause, so that leaving Reader keeps the
+    -- source visible until rendering is asked for again.
+    M.pause_buffer(source_bufnr)
+    return
+  end
+
+  -- The configured mode renders inside the source buffer itself, so leaving
+  -- Reader returns to it. Pausing here would strand the buffer unrendered,
+  -- with no cursor move, scroll, or edit able to bring it back.
+  M.state.paused_buffers[source_bufnr] = nil
+  M.state.last_signature[source_bufnr] = nil
+  if vim.api.nvim_buf_is_valid(source_bufnr) then
+    M.schedule_refresh({ bufnr = source_bufnr, silent = true, immediate = true })
+  end
+end
+
 function M.close_reader()
   local reader = require("markdown-table-wrap.reader")
   local bufnr = vim.api.nvim_get_current_buf()
@@ -564,7 +612,7 @@ function M.close_reader()
 
   local source_bufnr = reader.close(bufnr)
   if source_bufnr then
-    M.pause_buffer(source_bufnr)
+    release_reader_mode(source_bufnr)
     return true
   end
   return false
@@ -1004,14 +1052,22 @@ local function create_autocmds()
   vim.api.nvim_create_autocmd({ "BufLeave", "WinLeave" }, {
     group = M.state.augroup,
     callback = function(args)
-      require("markdown-table-wrap.inline").detach_window(vim.api.nvim_get_current_win())
+      local inline = require("markdown-table-wrap.inline")
       local config = config_for_buffer(args.buf)
-      if config.render_all then
-        return
-      end
 
-      if config.clear_on_cursor_leave ~= false then
-        require("markdown-table-wrap.inline").clear(args.buf)
+      -- Leaving releases the rendering only in this configuration, and
+      -- inline.clear() hands the window options back as part of that (it runs
+      -- restore_render_for_buffer over every window showing the buffer). No
+      -- separate detach belongs here: while the rendered blocks stay attached
+      -- -- under render_all, or with clear_on_cursor_leave = false -- the
+      -- window has to keep the options they depend on. conceallevel in
+      -- particular is load-bearing, since the source rows are hidden with
+      -- conceal_lines and handing back a lower conceallevel makes them
+      -- reappear underneath the still-attached block, with nothing to repair
+      -- it: WinEnter fires on the window being entered, whose buffer is
+      -- usually not the rendered one.
+      if not config.render_all and config.clear_on_cursor_leave ~= false then
+        inline.clear(args.buf)
         if M.state.inline_buf == args.buf then
           M.state.inline_buf = nil
         end
@@ -1023,12 +1079,16 @@ local function create_autocmds()
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = M.state.augroup,
     callback = function(args)
-      require("markdown-table-wrap.reader").cleanup(args.buf)
+      -- A Reader buffer can disappear without close_reader() ever running
+      -- (:bd, :bwipeout, quitting its last window). Its source would then be
+      -- left overridden to "reader" and unrendered forever.
+      release_reader_mode(require("markdown-table-wrap.reader").cleanup(args.buf))
       require("markdown-table-wrap.inline").dispose(args.buf)
       M.state.refresh_tokens[args.buf] = nil
       M.state.paused_buffers[args.buf] = nil
       M.state.auto_buffers[args.buf] = nil
       M.state.buffer_modes[args.buf] = nil
+      M.state.pre_reader_modes[args.buf] = nil
       M.state.inline_viewports[args.buf] = nil
       M.state.gx_fallbacks[args.buf] = nil
       M.state.gx_installed[args.buf] = nil
@@ -1082,6 +1142,7 @@ function M.setup(opts)
   M.state.paused_buffers = {}
   M.state.auto_buffers = {}
   M.state.buffer_modes = {}
+  M.state.pre_reader_modes = {}
   M.state.inline_viewports = {}
   M.state.last_signature = {}
   M.state.visual_buffers = {}

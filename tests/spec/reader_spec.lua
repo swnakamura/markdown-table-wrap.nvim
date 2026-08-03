@@ -97,7 +97,12 @@ h.test("reader toggle switches between rendered and source views", function()
   local plugin = require("markdown-table-wrap")
   local reader = require("markdown-table-wrap.reader")
 
-  plugin.setup({ auto_preview = false })
+  -- Closing Reader pauses the source for buffers whose configured mode *is*
+  -- Reader: an automatic refresh would otherwise reopen it immediately, and
+  -- "leave Reader" has to mean the source stays visible. Buffers configured
+  -- for inline rendering return to that instead -- see the companion test
+  -- "toggling the reader off returns to the default inline rendering".
+  plugin.setup({ auto_preview = false, preview_mode = "reader" })
 
   h.with_buffer({
     "| A | B |",

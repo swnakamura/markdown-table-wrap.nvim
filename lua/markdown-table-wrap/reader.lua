@@ -390,12 +390,34 @@ function M.open_link(reader_bufnr)
   return false
 end
 
+-- Tear down a Reader that went away without M.close(), e.g. because its
+-- buffer was deleted. Returns the source buffer so the caller can put it back
+-- into the state a proper close would have left it in.
 function M.cleanup(reader_bufnr)
   local state = states[reader_bufnr]
-  if state and vim.api.nvim_buf_is_valid(state.source_bufnr) then
-    vim.bo[state.source_bufnr].bufhidden = state.source_bufhidden or ""
-  end
   states[reader_bufnr] = nil
+  if not state then
+    return nil
+  end
+  -- M.close() hands the window its own options back on the way out; the
+  -- delete path has to do the same or the window keeps the Reader's wrap,
+  -- conceallevel and concealcursor for whatever it shows next. The windows
+  -- still on the Reader buffer at this point are the ones about to move off
+  -- it.
+  for _, winid in ipairs(vim.fn.win_findbuf(reader_bufnr)) do
+    if vim.api.nvim_win_is_valid(winid) then
+      for option, value in pairs(state.source_options or {}) do
+        vim.wo[winid][option] = value
+      end
+    end
+  end
+
+  if not vim.api.nvim_buf_is_valid(state.source_bufnr) then
+    return nil
+  end
+
+  vim.bo[state.source_bufnr].bufhidden = state.source_bufhidden or ""
+  return state.source_bufnr
 end
 
 function M.namespace()
