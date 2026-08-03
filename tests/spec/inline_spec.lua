@@ -472,6 +472,58 @@ h.test("off-screen tables skip relative-number re-attach until visible", functio
   end)
 end)
 
+h.test("stable height: table keeps constant screen height while cursor moves inside", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  h.with_buffer({
+    "| A | B |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+    "",
+    "after",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+
+    plugin.setup({
+      preview_mode = "inline",
+      debounce_ms = 0,
+      render_all = true,
+      auto_preview = true,
+    })
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    plugin.refresh_auto({ force = true })
+
+    -- Screen rows the table occupies: all attached virtual lines plus the
+    -- revealed raw cursor row (when inside).
+    local function virt_total()
+      local total = 0
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })) do
+        total = total + #((mark[4] or {}).virt_lines or {})
+      end
+      return total
+    end
+
+    local outside = virt_total()
+
+    local totals = {}
+    for row = 1, 3 do
+      vim.api.nvim_win_set_cursor(0, { row, 0 })
+      inline.update_reveal(buf)
+      -- raw line height is 1 here (short lines, no wrap)
+      table.insert(totals, virt_total() + 1)
+    end
+
+    h.assert_eq("row 1 and row 2 equal height", totals[1], totals[2])
+    h.assert_eq("row 2 and row 3 equal height", totals[2], totals[3])
+    -- Whole table rendered outside == flat count; inside it stays at that
+    -- height too because the filler absorbs the reveal swap.
+    h.assert_eq("inside height matches outside height", totals[1], outside)
+
+    inline.clear(buf)
+  end)
+end)
+
 h.test("row-anchored replace omits number column when 'number' is off", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")

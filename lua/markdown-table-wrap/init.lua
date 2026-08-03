@@ -46,6 +46,11 @@ local defaults = {
   -- cannot receive native line numbers). Follows 'number' and
   -- 'relativenumber'; relative numbers track the cursor row.
   inline_line_numbers = true,
+  -- Pad the revealed cursor row with blank virtual lines so the table keeps
+  -- a constant total screen height while the cursor moves between its rows.
+  -- Without this, every move swaps a rendered row for the raw soft-wrapped
+  -- source line (different heights), reflowing everything below the table.
+  inline_stable_height = true,
   reader = {
     auto_open = "has_table",
     wrap = true,
@@ -176,6 +181,7 @@ local function validate_config()
   M.config.inline_disable_wrap = M.config.inline_disable_wrap ~= false
   M.config.inline_viewport_scrolling = M.config.inline_viewport_scrolling ~= false
   M.config.inline_line_numbers = M.config.inline_line_numbers ~= false
+  M.config.inline_stable_height = M.config.inline_stable_height ~= false
   M.config.map_gx = M.config.map_gx == true
 
   if not vim.tbl_contains({ "always", "cursor", "never" }, M.config.inline_wrap_scope) then
@@ -408,6 +414,7 @@ local function table_signature(bufnr, table_info, config)
     tostring(config.inline_wrap_scope),
     tostring(config.inline_viewport_scrolling),
     tostring(config.inline_line_numbers),
+    tostring(config.inline_stable_height),
     table.concat(lines, "\n"),
   }, "\31")
 end
@@ -430,6 +437,7 @@ local function all_tables_signature(bufnr, tables, config)
     tostring(config.overlay_fill),
     tostring(config.inline_viewport_scrolling),
     tostring(config.inline_line_numbers),
+    tostring(config.inline_stable_height),
   }
 
   for _, table_info in ipairs(tables) do

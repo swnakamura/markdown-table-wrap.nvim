@@ -340,21 +340,21 @@ end
 -- The per-buffer state lives in `aligned_tables`, declared at the top of this
 -- file.
 
--- Describes the number column of a window showing bufnr, or nil when no
--- number column is displayed. Virtual lines cannot receive native line
--- numbers, so the column is drawn into the lines themselves via
--- virt_lines_leftcol.
-local function number_column(bufnr, entry)
-  if not entry.show_numbers then
-    return nil
-  end
-
+-- A window currently showing bufnr (preferring the current window), or nil.
+local function find_window(bufnr)
   local winid = vim.api.nvim_get_current_win()
   if vim.api.nvim_win_get_buf(winid) ~= bufnr then
     winid = vim.fn.win_findbuf(bufnr)[1]
-    if not winid then
-      return nil
-    end
+  end
+  return winid
+end
+
+-- Describes the number column of winid, or nil when no number column is
+-- displayed. Virtual lines cannot receive native line numbers, so the
+-- column is drawn into the lines themselves via virt_lines_leftcol.
+local function number_column(winid, entry)
+  if not entry.show_numbers or not winid then
+    return nil
   end
 
   if not (vim.wo[winid].number or vim.wo[winid].relativenumber) then
@@ -373,6 +373,49 @@ local function number_column(bufnr, entry)
   }
 end
 
+-- Number of blank virtual lines drawn directly under the revealed cursor
+-- row so that every other rendered line keeps its exact screen row while
+-- the cursor moves between table rows. Revealing row i swaps that row's
+-- rendered lines (group_lines[i]) for the raw source line's soft-wrapped
+-- height; the filler tops the swap region up to a constant
+--   E = max over rows of (estimated raw height - group lines)
+-- extra rows (filler_i = E - (raw height_i - group_lines_i)), which makes
+-- the position of everything after the revealed row invariant across moves
+-- and pins the total table height to #flat + E.
+local function stable_filler(winid, entry, split)
+  if not entry.stable_height or not winid or not split then
+    return 0
+  end
+
+  local info = vim.fn.getwininfo(winid)[1]
+  local usable = math.max(1, info.width - info.textoff)
+
+  local function estimate(index)
+    return math.max(1, math.ceil(math.max(entry.row_widths[index] or 1, 1) / usable))
+  end
+
+  local extra = 0
+  for index = 1, #entry.row_widths do
+    extra = math.max(extra, estimate(index) - entry.group_lines[index])
+  end
+  extra = math.max(0, extra)
+
+  -- The revealed row is on screen (the cursor is on it), so its real
+  -- soft-wrapped height is measurable; fall back to the estimate. `all`
+  -- includes virtual lines attached to the row, `fill` is their count, so
+  -- the raw text height is the difference.
+  local height
+  local row = entry.start_row + split - 1
+  local ok, measured = pcall(vim.api.nvim_win_text_height, winid, { start_row = row, end_row = row })
+  if ok and measured.all and measured.all - (measured.fill or 0) > 0 then
+    height = measured.all - (measured.fill or 0)
+  else
+    height = estimate(split)
+  end
+
+  return math.max(0, extra - (height - entry.group_lines[split]))
+end
+
 -- (Re-)attach the rendered virtual-line blocks of one table. split is the
 -- 1-based group index of the cursor row, or nil when the cursor is outside.
 local function set_table_blocks(bufnr, entry, split)
@@ -383,7 +426,8 @@ local function set_table_blocks(bufnr, entry, split)
     end
   end
 
-  local column = number_column(bufnr, entry)
+  local winid = find_window(bufnr)
+  local column = number_column(winid, entry)
   entry.numbers_relative = column ~= nil and column.relative or false
   entry.number_cursor_row = column and column.cursor_row or nil
 
@@ -418,8 +462,14 @@ local function set_table_blocks(bufnr, entry, split)
 
   local source = entry.numbered or entry.flat
 
-  local function attach(row, first, last, above)
+  local function attach(row, first, last, above, filler)
     local lines = {}
+    -- The filler leads the block: it sits directly under the revealed raw
+    -- line, so the rendered lines that follow stay on fixed screen rows.
+    for _ = 1, filler or 0 do
+      table.insert(lines, column and { { string.rep(" ", column.textoff), "LineNr" } } or {})
+    end
+
     for index = math.max(first, 1), math.min(last, #source) do
       table.insert(lines, source[index])
     end
@@ -449,7 +499,7 @@ local function set_table_blocks(bufnr, entry, split)
     local info = entry.group_index[split]
     local row = entry.start_row + split - 1
     entry.above_id = attach(row, 1, info.content_start - 1, true)
-    entry.below_id = attach(row, info.last + 1, #entry.flat, false)
+    entry.below_id = attach(row, info.last + 1, #entry.flat, false, stable_filler(winid, entry, split))
   elseif entry.end_row + 1 < line_count then
     entry.above_id = attach(entry.end_row + 1, 1, #entry.flat, true)
   else
@@ -487,8 +537,32 @@ function M.update_reveal(bufnr)
     local numbers_stale = entry.numbers_relative and entry.number_cursor_row ~= row
     local visible = entry.end_row + 1 >= top - 1 and entry.start_row - 1 <= bot + 1
 
-    if entry.split ~= (split or false) or (numbers_stale and visible) then
+    local split_changed = entry.split ~= (split or false)
+
+    if split_changed or (numbers_stale and visible) then
       set_table_blocks(bufnr, entry, split)
+    end
+
+    if not split and split_changed then
+      -- While the cursor is inside the table the topline usually sits on
+      -- the revealed source row (scrolled topfill rows into the virtual
+      -- block above it). The moment the cursor leaves, that row is
+      -- concealed again, the topline becomes invalid, and Neovim normalizes
+      -- the view upward: the viewport visibly jumped above the table and
+      -- the cursor sat off-screen for several hundred ms. Repair it with a
+      -- plain view assignment; normal-mode scroll commands are unusable
+      -- here (they clamp or drag the off-screen cursor back into the
+      -- table). topline = cursor line yields a stable view with a few rows
+      -- of the table's tail auto-filled above the cursor.
+      vim.schedule(function()
+        if vim.api.nvim_get_current_buf() ~= bufnr then
+          return
+        end
+
+        if vim.fn.winline() > vim.api.nvim_win_get_height(0) then
+          vim.fn.winrestview({ topline = vim.api.nvim_win_get_cursor(0)[1] })
+        end
+      end)
     end
   end
 end
@@ -528,6 +602,17 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
     table.insert(group_index, { content_start = content_start, last = #flat })
   end
 
+  -- Per-row data for the stable-height filler: display width of each raw
+  -- source line and the number of rendered content lines its group hides
+  -- while revealed.
+  local row_widths = {}
+  local group_lines = {}
+  local source_lines = vim.api.nvim_buf_get_lines(bufnr, start_row, end_row + 1, false)
+  for index, info in ipairs(group_index) do
+    row_widths[index] = vim.fn.strdisplaywidth(source_lines[index] or "")
+    group_lines[index] = info.last - info.content_start + 1
+  end
+
   local entry = {
     start_row = start_row,
     end_row = end_row,
@@ -536,6 +621,9 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
     group_index = group_index,
     priority = priority,
     show_numbers = config.inline_line_numbers ~= false,
+    stable_height = config.inline_stable_height ~= false,
+    row_widths = row_widths,
+    group_lines = group_lines,
   }
 
   for row = start_row, end_row do

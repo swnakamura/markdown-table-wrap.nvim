@@ -122,6 +122,7 @@ return {
       inline_wrap_scope = "cursor",
       inline_viewport_scrolling = false,
       inline_line_numbers = true,
+      inline_stable_height = true,
       reader = {
         auto_open = "has_table",
         wrap = true,
@@ -343,6 +344,7 @@ require("markdown-table-wrap").setup({
   inline_wrap_scope = "cursor",
   inline_viewport_scrolling = false,
   inline_line_numbers = true,
+  inline_stable_height = true,
   reader = {
     auto_open = "has_table",
     wrap = true,
@@ -401,6 +403,7 @@ Options:
 - `inline_wrap_scope`: controls where `inline_disable_wrap` applies, and is only consulted when it is `true`. `"always"` keeps the window-wide `nowrap` behavior, `"cursor"` (the default) disables wrapping only while the cursor is inside a rendered table, and `"never"` leaves `wrap` fully under user control.
 - `inline_viewport_scrolling`: when `true`, `:MarkdownTableScrollDown` and `:MarkdownTableScrollUp` page through rendered rows inside the original table height. The default is `false`, which shows the complete rendered table inline with extra virtual lines.
 - `inline_line_numbers`: draw the window's line numbers into the rendered table rows in row-anchored replace mode (virtual lines cannot receive native line numbers). Each source row's number appears on the first rendered line of that row, using the `LineNr` highlight. Shown only when the window has `'number'` or `'relativenumber'` set; with `'relativenumber'` the distance to the cursor row is shown and updates as the cursor moves. Default `true`.
+- `inline_stable_height`: pad the revealed cursor row with blank virtual lines so the table keeps a constant total screen height while the cursor moves between its rows. Without it, every move swaps a rendered row for the raw soft-wrapped source line (usually a different height), reflowing the rest of the table and everything below it. Default `true`.
 - `highlight_preset`: `"default"`, `"tokyonight"`, `"catppuccin"`, `"render_markdown"`, `"auto"`, or any custom key supplied through `themes`/`theme_dir`. The default preset follows standard Neovim highlight groups so it fits arbitrary colorschemes without extra theme tuning.
 - `theme_dir`: optional directory containing custom theme files named `<preset>.lua`; the file name must match `highlight_preset`.
 - `themes`: inline custom theme table keyed by `highlight_preset`.
