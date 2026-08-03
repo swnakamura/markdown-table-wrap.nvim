@@ -42,6 +42,10 @@ local defaults = {
   -- one, "never" leaves it alone.
   inline_wrap_scope = "cursor",
   inline_viewport_scrolling = false,
+  -- Draw the window's line numbers into the rendered rows (virtual lines
+  -- cannot receive native line numbers). Follows 'number' and
+  -- 'relativenumber'; relative numbers track the cursor row.
+  inline_line_numbers = true,
   reader = {
     auto_open = "has_table",
     wrap = true,
@@ -171,6 +175,7 @@ local function validate_config()
   M.config.clear_on_visual = M.config.clear_on_visual ~= false
   M.config.inline_disable_wrap = M.config.inline_disable_wrap ~= false
   M.config.inline_viewport_scrolling = M.config.inline_viewport_scrolling ~= false
+  M.config.inline_line_numbers = M.config.inline_line_numbers ~= false
   M.config.map_gx = M.config.map_gx == true
 
   if not vim.tbl_contains({ "always", "cursor", "never" }, M.config.inline_wrap_scope) then
@@ -402,6 +407,7 @@ local function table_signature(bufnr, table_info, config)
     tostring(config.inline_disable_wrap),
     tostring(config.inline_wrap_scope),
     tostring(config.inline_viewport_scrolling),
+    tostring(config.inline_line_numbers),
     table.concat(lines, "\n"),
   }, "\31")
 end
@@ -423,6 +429,7 @@ local function all_tables_signature(bufnr, tables, config)
     tostring(config.inline_wrap_scope),
     tostring(config.overlay_fill),
     tostring(config.inline_viewport_scrolling),
+    tostring(config.inline_line_numbers),
   }
 
   for _, table_info in ipairs(tables) do
@@ -903,6 +910,19 @@ local function create_autocmds()
       end,
     }
   )
+
+  vim.api.nvim_create_autocmd("WinScrolled", {
+    group = M.state.augroup,
+    callback = function(args)
+      if not is_markdown_buffer() then
+        return
+      end
+
+      -- A table with stale relative line numbers (skipped while off-screen)
+      -- can scroll into view without the cursor moving; catch up here.
+      require("markdown-table-wrap.inline").update_reveal(args.buf)
+    end,
+  })
 
   vim.api.nvim_create_autocmd("InsertEnter", {
     group = M.state.augroup,

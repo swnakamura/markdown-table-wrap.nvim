@@ -340,12 +340,37 @@ end
 -- The per-buffer state lives in `aligned_tables`, declared at the top of this
 -- file.
 
-local function slice(list, first, last)
-  local result = {}
-  for index = math.max(first, 1), math.min(last, #list) do
-    table.insert(result, list[index])
+-- Describes the number column of a window showing bufnr, or nil when no
+-- number column is displayed. Virtual lines cannot receive native line
+-- numbers, so the column is drawn into the lines themselves via
+-- virt_lines_leftcol.
+local function number_column(bufnr, entry)
+  if not entry.show_numbers then
+    return nil
   end
-  return result
+
+  local winid = vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_get_buf(winid) ~= bufnr then
+    winid = vim.fn.win_findbuf(bufnr)[1]
+    if not winid then
+      return nil
+    end
+  end
+
+  if not (vim.wo[winid].number or vim.wo[winid].relativenumber) then
+    return nil
+  end
+
+  local textoff = vim.fn.getwininfo(winid)[1].textoff
+  if textoff <= 1 then
+    return nil
+  end
+
+  return {
+    textoff = textoff,
+    relative = vim.wo[winid].relativenumber,
+    cursor_row = vim.api.nvim_win_get_cursor(winid)[1] - 1,
+  }
 end
 
 -- (Re-)attach the rendered virtual-line blocks of one table. split is the
@@ -358,13 +383,54 @@ local function set_table_blocks(bufnr, entry, split)
     end
   end
 
-  local function attach(row, lines, above)
+  local column = number_column(bufnr, entry)
+  entry.numbers_relative = column ~= nil and column.relative or false
+  entry.number_cursor_row = column and column.cursor_row or nil
+
+  -- The first rendered line of each source row carries that row's line
+  -- number, right-aligned like the native column; continuation and border
+  -- lines get a blank column. With 'relativenumber' the distance to the
+  -- cursor row is shown instead (the cursor row itself is always revealed
+  -- natively, so no rendered line ever needs the hybrid absolute number).
+  --
+  -- The prefixed lines are cached on the entry; re-attaching (which happens
+  -- per cursor line move under 'relativenumber') only rewrites the number
+  -- text in place instead of rebuilding every chunk list.
+  if not column then
+    entry.numbered = nil
+  else
+    if not entry.numbered or entry.numbered_textoff ~= column.textoff then
+      entry.numbered = {}
+      entry.numbered_textoff = column.textoff
+      local blank = string.rep(" ", column.textoff)
+      for index, chunks in ipairs(entry.flat) do
+        entry.numbered[index] = vim.list_extend({ { blank, "LineNr" } }, chunks)
+      end
+    end
+
+    for index, lnum in pairs(entry.flat_lnums) do
+      if lnum then
+        local display = column.relative and math.abs(lnum - 1 - column.cursor_row) or lnum
+        entry.numbered[index][1][1] = string.format("%" .. (column.textoff - 1) .. "d ", display)
+      end
+    end
+  end
+
+  local source = entry.numbered or entry.flat
+
+  local function attach(row, first, last, above)
+    local lines = {}
+    for index = math.max(first, 1), math.min(last, #source) do
+      table.insert(lines, source[index])
+    end
+
     if #lines == 0 then
       return nil
     end
     return vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
       virt_lines = lines,
       virt_lines_above = above,
+      virt_lines_leftcol = column ~= nil,
       right_gravity = false,
       priority = entry.priority,
     })
@@ -382,12 +448,12 @@ local function set_table_blocks(bufnr, entry, split)
   if split then
     local info = entry.group_index[split]
     local row = entry.start_row + split - 1
-    entry.above_id = attach(row, slice(entry.flat, 1, info.content_start - 1), true)
-    entry.below_id = attach(row, slice(entry.flat, info.last + 1, #entry.flat), false)
+    entry.above_id = attach(row, 1, info.content_start - 1, true)
+    entry.below_id = attach(row, info.last + 1, #entry.flat, false)
   elseif entry.end_row + 1 < line_count then
-    entry.above_id = attach(entry.end_row + 1, entry.flat, true)
+    entry.above_id = attach(entry.end_row + 1, 1, #entry.flat, true)
   else
-    entry.below_id = attach(entry.start_row - 1, entry.flat, false)
+    entry.below_id = attach(entry.start_row - 1, 1, #entry.flat, false)
   end
 
   entry.split = split or false
@@ -404,6 +470,8 @@ function M.update_reveal(bufnr)
   end
 
   local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local top = vim.fn.line("w0") - 1
+  local bot = vim.fn.line("w$") - 1
 
   for _, entry in pairs(tables) do
     local split = nil
@@ -411,7 +479,15 @@ function M.update_reveal(bufnr)
       split = row - entry.start_row + 1
     end
 
-    if entry.split ~= (split or false) then
+    -- Relative line numbers are measured from the cursor row, so the blocks
+    -- also go stale whenever the cursor changes lines. Refreshing them only
+    -- matters while some part of the table can be on screen: an off-screen
+    -- table stays stale (number_cursor_row keeps the old row) and catches
+    -- up here as soon as it scrolls back into view.
+    local numbers_stale = entry.numbers_relative and entry.number_cursor_row ~= row
+    local visible = entry.end_row + 1 >= top - 1 and entry.start_row - 1 <= bot + 1
+
+    if entry.split ~= (split or false) or (numbers_stale and visible) then
       set_table_blocks(bufnr, entry, split)
     end
   end
@@ -427,21 +503,26 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
 
   -- Flatten the rendered lines, remembering where each group's content
   -- starts/ends so the blocks can be split around any source row. A group's
-  -- leading border belongs to the block above its row.
+  -- leading border belongs to the block above its row. flat_lnums maps each
+  -- flat line to its source line number (first content line of a group) or
+  -- false (border/continuation lines).
   local flat = {}
+  local flat_lnums = {}
   local group_index = {}
   local line_index = 0
 
-  for _, group in ipairs(rendered.groups) do
+  for group_number, group in ipairs(rendered.groups) do
     for _, line_obj in ipairs(group.leading or {}) do
       line_index = line_index + 1
       table.insert(flat, chunks_from_line_object(line_obj, line_index))
+      table.insert(flat_lnums, false)
     end
 
     local content_start = #flat + 1
-    for _, line_obj in ipairs(group.lines) do
+    for offset, line_obj in ipairs(group.lines) do
       line_index = line_index + 1
       table.insert(flat, chunks_from_line_object(line_obj, line_index))
+      table.insert(flat_lnums, offset == 1 and (start_row + group_number) or false)
     end
 
     table.insert(group_index, { content_start = content_start, last = #flat })
@@ -451,8 +532,10 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
     start_row = start_row,
     end_row = end_row,
     flat = flat,
+    flat_lnums = flat_lnums,
     group_index = group_index,
     priority = priority,
+    show_numbers = config.inline_line_numbers ~= false,
   }
 
   for row = start_row, end_row do

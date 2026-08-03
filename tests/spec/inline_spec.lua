@@ -299,6 +299,217 @@ h.test("row-anchored inline replace hides rows with conceal_lines, no overlays",
   end)
 end)
 
+h.test("row-anchored replace draws line numbers into rendered rows", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  h.with_buffer({
+    "| A | B |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+    "",
+    "after",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.wo.number = true
+
+    plugin.setup({
+      preview_mode = "inline",
+      debounce_ms = 0,
+      render_all = true,
+      auto_preview = true,
+    })
+    vim.api.nvim_win_set_cursor(0, { 4, 0 }) -- outside the table
+    plugin.refresh_auto({ force = true })
+
+    local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
+    local numbers = {}
+    local leftcol = false
+
+    for _, mark in ipairs(marks) do
+      local details = mark[4] or {}
+      if details.virt_lines then
+        leftcol = leftcol or details.virt_lines_leftcol == true
+        for _, line in ipairs(details.virt_lines) do
+          local first = line[1]
+          if first and first[2] == "LineNr" then
+            local digits = first[1]:match("^%s*(%d+)%s$")
+            if digits then
+              table.insert(numbers, tonumber(digits))
+            end
+          end
+        end
+      end
+    end
+
+    h.assert_true("virtual lines start at window leftcol", leftcol)
+    h.assert_eq("one line number per source row", #numbers, 3)
+    h.assert_eq("first source line number", numbers[1], 1)
+    h.assert_eq("second source line number", numbers[2], 2)
+    h.assert_eq("third source line number", numbers[3], 3)
+
+    vim.wo.number = false
+    inline.clear(buf)
+  end)
+end)
+
+h.test("row-anchored replace shows relative numbers with 'relativenumber'", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  h.with_buffer({
+    "| A | B |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+    "",
+    "after",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.wo.relativenumber = true
+
+    plugin.setup({
+      preview_mode = "inline",
+      debounce_ms = 0,
+      render_all = true,
+      auto_preview = true,
+    })
+
+    local function rendered_numbers()
+      local numbers = {}
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })) do
+        for _, line in ipairs((mark[4] or {}).virt_lines or {}) do
+          local first = line[1]
+          if first and first[2] == "LineNr" then
+            local digits = first[1]:match("^%s*(%d+)%s$")
+            if digits then
+              table.insert(numbers, tonumber(digits))
+            end
+          end
+        end
+      end
+      return numbers
+    end
+
+    vim.api.nvim_win_set_cursor(0, { 4, 0 }) -- outside the table
+    plugin.refresh_auto({ force = true })
+
+    h.assert_eq("distances from cursor row 4", table.concat(rendered_numbers(), ","), "3,2,1")
+
+    vim.api.nvim_win_set_cursor(0, { 1, 0 }) -- header row inside the table
+    inline.update_reveal(buf)
+
+    -- Row 1 is revealed natively; rows 2 and 3 render at distances 1 and 2.
+    h.assert_eq("distances from cursor row 1", table.concat(rendered_numbers(), ","), "1,2")
+
+    vim.wo.relativenumber = false
+    inline.clear(buf)
+  end)
+end)
+
+h.test("off-screen tables skip relative-number re-attach until visible", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  local lines = {
+    "| A | B |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+  }
+  table.insert(lines, "")
+  for i = 1, 200 do
+    table.insert(lines, "filler " .. i)
+  end
+
+  h.with_buffer(lines, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.wo.relativenumber = true
+
+    plugin.setup({
+      preview_mode = "inline",
+      debounce_ms = 0,
+      render_all = true,
+      auto_preview = true,
+    })
+
+    local function rendered_numbers()
+      local numbers = {}
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })) do
+        for _, line in ipairs((mark[4] or {}).virt_lines or {}) do
+          local first = line[1]
+          if first and first[2] == "LineNr" then
+            local digits = first[1]:match("^%s*(%d+)%s$")
+            if digits then
+              table.insert(numbers, tonumber(digits))
+            end
+          end
+        end
+      end
+      return table.concat(numbers, ",")
+    end
+
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    plugin.refresh_auto({ force = true })
+    h.assert_eq("initial distances from row 4", rendered_numbers(), "3,2,1")
+
+    -- Scroll far below: the table leaves the viewport, so cursor moves must
+    -- leave its (now stale) numbers untouched.
+    vim.cmd("normal! G")
+    inline.update_reveal(buf)
+    h.assert_true("table is off screen", vim.fn.line("w0") > 4)
+    local stale = rendered_numbers()
+    vim.api.nvim_win_set_cursor(0, { 150, 0 })
+    inline.update_reveal(buf)
+    h.assert_eq("off-screen table numbers untouched", rendered_numbers(), stale)
+
+    -- Back to the top: the table is visible again and must catch up.
+    vim.cmd("normal! gg")
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    inline.update_reveal(buf)
+    h.assert_eq("numbers catch up when visible again", rendered_numbers(), "3,2,1")
+
+    vim.wo.relativenumber = false
+    inline.clear(buf)
+  end)
+end)
+
+h.test("row-anchored replace omits number column when 'number' is off", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  h.with_buffer({
+    "| A | B |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+    "",
+    "after",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.wo.number = false
+    vim.wo.relativenumber = false
+
+    plugin.setup({
+      preview_mode = "inline",
+      debounce_ms = 0,
+      render_all = true,
+      auto_preview = true,
+    })
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    plugin.refresh_auto({ force = true })
+
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })) do
+      local details = mark[4] or {}
+      if details.virt_lines then
+        h.assert_false("no leftcol without a number column", details.virt_lines_leftcol == true)
+        for _, line in ipairs(details.virt_lines) do
+          h.assert_false("no LineNr prefix without a number column", line[1] and line[1][2] == "LineNr")
+        end
+      end
+    end
+
+    inline.clear(buf)
+  end)
+end)
+
 h.test("inline viewport toggle switches between sliced and full rendering", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
