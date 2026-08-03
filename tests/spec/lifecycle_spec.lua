@@ -148,6 +148,8 @@ h.test("leaving an inline window or buffer restores its local options", function
     auto_preview = false,
     preview_mode = "inline",
     render_all = true,
+    -- Opt in: 'wrap' and 'concealcursor' are left alone by default.
+    inline_disable_wrap = true,
     inline_wrap_scope = "always",
     debounce_ms = 0,
   })

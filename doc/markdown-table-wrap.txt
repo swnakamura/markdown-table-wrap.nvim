@@ -261,7 +261,7 @@ Default setup:
     overlay_priority = 10000,
     overlay_fill = true,
     inline_virtual_text = "overlay",
-    inline_disable_wrap = true,
+    inline_disable_wrap = false,
     inline_wrap_scope = "cursor",
     inline_viewport_scrolling = false,
     reader = {
@@ -340,8 +340,18 @@ inline_disable_wrap~
     concealed source rows can otherwise soft-wrap underneath the rendered
     table on some terminal and platform combinations.
 
+    Default false. On Neovim 0.11 or newer the source rows are removed from
+    the screen with "conceal_lines" instead of merely concealed, so they
+    cannot soft-wrap, and 'wrap' must stay on for the raw source row revealed
+    under the cursor to soft-wrap like any other line.
+
+    Setting this to true opts into the hard-replace behaviour: 'wrap' is
+    cleared and 'concealcursor' is set, so no raw row is revealed under the
+    cursor.
+
 inline_wrap_scope~
-    Controls where |markdown-table-wrap-inline-disable-wrap| applies:
+    Controls where |markdown-table-wrap-inline-disable-wrap| applies. Only
+    consulted when that option is true.
 
     "always" disables wrap for the whole window while inline tables are
        active. This is the strictest and most stable setting.

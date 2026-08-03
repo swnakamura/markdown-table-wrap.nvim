@@ -5,12 +5,19 @@ local M = {}
 local break_chars = {
   [" "] = true,
   ["\t"] = true,
+  ["　"] = true,
   ["、"] = true,
   ["，"] = true,
   [","] = true,
   ["；"] = true,
   [";"] = true,
   ["/"] = true,
+}
+
+local whitespace_chars = {
+  [" "] = true,
+  ["\t"] = true,
+  ["　"] = true,
 }
 
 local function iter_chars_with_pos(text)
@@ -118,7 +125,27 @@ local function slice_chars(chars, start_index, end_index)
   return result
 end
 
+-- Drop leading whitespace so a continuation line never starts with the
+-- space we broke at (which would otherwise trim down to a blank line).
+local function drop_leading_whitespace(chars)
+  while chars[1] and whitespace_chars[chars[1].text] do
+    table.remove(chars, 1)
+  end
+  return chars
+end
+
 local function append_line(lines, chars)
+  -- Trim trailing whitespace char-wise (covers the ideographic space U+3000,
+  -- which the byte-wise %s trim in line_from_chars cannot touch) and skip
+  -- lines that would render blank.
+  while chars[#chars] and whitespace_chars[chars[#chars].text] do
+    table.remove(chars, #chars)
+  end
+
+  if #chars == 0 then
+    return
+  end
+
   table.insert(lines, line_from_chars(chars))
 end
 
@@ -127,21 +154,32 @@ local function wrap_segment(chars, limit, lines)
   local last_break = nil
 
   for _, item in ipairs(chars) do
+    if #current == 0 and whitespace_chars[item.text] then
+      -- Never start a line with whitespace
+      goto continue
+    end
+
     if #current > 0 and width.strwidth(line_from_chars(current).text .. item.text) > limit then
       if last_break and last_break < #current then
         append_line(lines, slice_chars(current, 1, last_break))
-        current = slice_chars(current, last_break + 1, #current)
+        current = drop_leading_whitespace(slice_chars(current, last_break + 1, #current))
       else
         append_line(lines, current)
         current = {}
       end
       last_break = nil
+
+      if #current == 0 and whitespace_chars[item.text] then
+        goto continue
+      end
     end
 
     table.insert(current, item)
     if break_chars[item.text] then
       last_break = #current
     end
+
+    ::continue::
   end
 
   if #current > 0 then

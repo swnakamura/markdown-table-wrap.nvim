@@ -32,7 +32,7 @@ h.test("system render chain only conceals detected table range", function()
     for _, mark in ipairs(marks) do
       local row = mark[2]
       local details = mark[4] or {}
-      if details.conceal == "" then
+      if details.conceal_lines == "" then
         concealed_rows[row] = true
       end
       for _, chunk in ipairs(details.virt_text or {}) do

@@ -30,13 +30,13 @@ h.test("inline whole-buffer render uses extmarks and conceal options", function(
     local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
     h.assert_true("inline marks", #marks > 0)
     h.assert_eq("conceallevel set", vim.wo.conceallevel, 2)
-    h.assert_eq("concealcursor set", vim.wo.concealcursor, "nvc")
-    h.assert_false("wrap disabled while inline replace is active", vim.wo.wrap)
+    -- concealcursor and wrap are left alone: the revealed cursor row must
+    -- show (and soft-wrap) the raw source in every mode.
+    h.assert_eq("concealcursor untouched", vim.wo.concealcursor, "")
+    h.assert_true("wrap untouched while inline replace is active", vim.wo.wrap)
 
     inline.clear(buf)
     h.assert_eq("conceallevel restored", vim.wo.conceallevel, 0)
-    h.assert_eq("concealcursor restored", vim.wo.concealcursor, "")
-    h.assert_true("wrap restored", vim.wo.wrap)
   end)
 end)
 
@@ -49,6 +49,9 @@ h.test("cursor wrap scope preserves prose wrapping outside tables", function()
     debounce_ms = 0,
     render_all = true,
     auto_preview = true,
+    -- Opt in: 'wrap' is left alone by default so the revealed cursor row can
+    -- soft-wrap, and inline_wrap_scope is only consulted once this is true.
+    inline_disable_wrap = true,
     inline_wrap_scope = "cursor",
   })
 
@@ -243,24 +246,16 @@ h.test("inline viewport scroll changes rendered table slice", function()
   end)
 end)
 
-h.test("inline replace can use overlay or fixed window column virtual text", function()
+h.test("row-anchored inline replace hides rows with conceal_lines, no overlays", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
-
-  local function first_virtual_text_mark(buf)
-    local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
-    for _, mark in ipairs(marks) do
-      if mark[4] and mark[4].virt_text then
-        return mark[4]
-      end
-    end
-    return nil
-  end
 
   h.with_buffer({
     "| A | B |",
     "| --- | --- |",
     "| 1 | 2 |",
+    "",
+    "after",
   }, function(buf)
     vim.bo[buf].filetype = "markdown"
 
@@ -269,27 +264,36 @@ h.test("inline replace can use overlay or fixed window column virtual text", fun
       debounce_ms = 0,
       render_all = true,
       auto_preview = true,
-      inline_virtual_text = "overlay",
     })
+    vim.api.nvim_win_set_cursor(0, { 4, 0 }) -- outside the table
     plugin.refresh_auto({ force = true })
 
-    local overlay = first_virtual_text_mark(buf)
-    h.assert_eq("overlay render mode", overlay.virt_text_pos, "overlay")
-    h.assert_eq("overlay avoids fixed win col", overlay.virt_text_win_col, nil)
+    local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
+    local concealed_lines = 0
+    local has_virt_text = false
+    local has_inline_conceal = false
+    local virt_line_count = 0
 
-    inline.clear(buf)
-    plugin.setup({
-      preview_mode = "inline",
-      debounce_ms = 0,
-      render_all = true,
-      auto_preview = true,
-      inline_virtual_text = "win_col",
-    })
-    plugin.refresh_auto({ force = true })
+    for _, mark in ipairs(marks) do
+      local details = mark[4] or {}
+      if details.conceal_lines == "" then
+        concealed_lines = concealed_lines + 1
+      end
+      if details.conceal == "" then
+        has_inline_conceal = true
+      end
+      if details.virt_text then
+        has_virt_text = true
+      end
+      virt_line_count = virt_line_count + #(details.virt_lines or {})
+    end
 
-    local win_col = first_virtual_text_mark(buf)
-    h.assert_eq("win_col render mode", win_col.virt_text_win_col, 0)
-    h.assert_eq("win_col reports fixed position", win_col.virt_text_pos, "win_col")
+    h.assert_eq("every source row hidden via conceal_lines", concealed_lines, 3)
+    -- Inline conceal keeps a wrapped long line's soft-wrap screen rows,
+    -- which rendered as blank lines; conceal_lines collapses them entirely.
+    h.assert_false("no inline conceal used", has_inline_conceal)
+    h.assert_false("no virt_text overlays used", has_virt_text)
+    h.assert_true("whole rendered table present as virtual lines", virt_line_count >= 5)
 
     inline.clear(buf)
   end)
@@ -341,7 +345,7 @@ h.test("inline viewport toggle switches between sliced and full rendering", func
   end)
 end)
 
-h.test("extra inline virtual lines keep their original rendered line index", function()
+h.test("row-anchored lines keep their original rendered line index", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
 
@@ -367,21 +371,32 @@ h.test("extra inline virtual lines keep their original rendered line index", fun
 
     local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
     local member_b_chunks = nil
+    local member_b_row = nil
 
-    for _, mark in ipairs(marks) do
-      for _, virt_line in ipairs((mark[4] or {}).virt_lines or {}) do
-        local text = {}
-        for _, chunk in ipairs(virt_line) do
-          table.insert(text, chunk[1])
-        end
+    local function scan_chunks(chunks, row)
+      local text = {}
+      for _, chunk in ipairs(chunks) do
+        table.insert(text, chunk[1])
+      end
 
-        if table.concat(text):find("成员 B", 1, true) then
-          member_b_chunks = virt_line
-        end
+      if table.concat(text):find("成员 B", 1, true) then
+        member_b_chunks = chunks
+        member_b_row = row
       end
     end
 
-    h.assert_true("member B rendered as extra virtual line", member_b_chunks ~= nil)
+    for _, mark in ipairs(marks) do
+      local details = mark[4] or {}
+      if details.virt_text then
+        scan_chunks(details.virt_text, mark[2])
+      end
+      for _, virt_line in ipairs(details.virt_lines or {}) do
+        scan_chunks(virt_line, mark[2])
+      end
+    end
+
+    h.assert_true("member B is rendered", member_b_chunks ~= nil)
+    h.assert_true("member B rendered as a virtual line", member_b_row ~= nil)
 
     local groups = {}
     for _, chunk in ipairs(member_b_chunks) do
@@ -430,6 +445,121 @@ h.test("inline insert mode highlights every wrapped header line", function()
     end
 
     h.assert_true("wrapped header spans multiple virtual lines", highlighted_header_lines > 1)
+    inline.clear(buf)
+  end)
+end)
+
+h.test("cursor row is revealed as raw source and restored on leave", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    preview_mode = "inline",
+    debounce_ms = 0,
+    render_all = true,
+    auto_preview = true,
+    row_separator = true,
+  })
+
+  local long_line = "| alpha | " .. string.rep("wrapping content ", 12) .. "|"
+
+  h.with_buffer({
+    "| Name | Description |",
+    "| --- | --- |",
+    long_line,
+    "| beta | short |",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+
+    -- Per-row state: conceal_lines mark and attached virt_lines blocks
+    local function row_state(row)
+      local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), { row, 0 }, { row, -1 }, { details = true })
+      local state = { conceal_lines = false, blocks = 0, block_lines = 0 }
+      for _, mark in ipairs(marks) do
+        local details = mark[4] or {}
+        if details.conceal_lines == "" then
+          state.conceal_lines = true
+        end
+        if details.virt_lines then
+          state.blocks = state.blocks + 1
+          state.block_lines = state.block_lines + #details.virt_lines
+        end
+      end
+      return state
+    end
+
+    -- Cursor on the long row (0-based row 2): the rendered blocks split
+    -- around it. Neovim reveals the raw line itself (conceal_lines is
+    -- inactive on the cursor line), soft-wrapping at the window width.
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    plugin.refresh_auto({ force = true })
+
+    -- Own text height of a row: total minus filler (virt_lines below a
+    -- previous row are counted as the next row's fill)
+    local function text_rows(row)
+      local height = vim.api.nvim_win_text_height(0, { start_row = row, end_row = row })
+      return height.all - height.fill
+    end
+
+    local cursor_row = row_state(2)
+    h.assert_true("cursor row still carries conceal_lines", cursor_row.conceal_lines)
+    h.assert_eq("blocks split around the cursor row", cursor_row.blocks, 2)
+    -- ...and Neovim auto-reveals it on screen:
+    h.assert_true("cursor row is revealed and soft-wraps", text_rows(2) >= 2)
+
+    local other = row_state(3)
+    h.assert_eq("other rows have no blocks", other.blocks, 0)
+    h.assert_eq("other row is fully hidden", text_rows(3), 0)
+
+    -- The cursor row's own rendered lines are excluded from the blocks:
+    -- blocks hold strictly fewer lines than the whole rendered table.
+    local whole = 0
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })) do
+      whole = whole + #((mark[4] or {}).virt_lines or {})
+    end
+    h.assert_true("cursor row content not duplicated in blocks", whole == cursor_row.block_lines)
+
+    -- Move to another row: blocks re-split there
+    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    inline.update_reveal(buf)
+
+    h.assert_eq("blocks moved off the left row", row_state(2).blocks, 0)
+    -- Last row: the below-block is empty, so only the above-block remains
+    h.assert_true("blocks split around the new cursor row", row_state(3).blocks >= 1)
+    h.assert_eq("left row hidden again", text_rows(2), 0)
+
+    inline.clear(buf)
+  end)
+end)
+
+h.test("insert mode keeps the table rendered with the cursor row revealed", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    preview_mode = "inline",
+    debounce_ms = 0,
+    render_all = true,
+    auto_preview = true,
+  })
+
+  h.with_buffer({
+    "| A | B |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+    "| 3 | 4 |",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.api.nvim_win_set_cursor(0, { 3, 2 })
+    plugin.refresh_auto({ force = true })
+    h.assert_true("rendered before insert", inline.is_active(buf))
+
+    -- Insert mode: refresh no longer clears the rendering
+    vim.cmd("startinsert")
+    plugin.refresh_auto({ force = true })
+    h.assert_true("still rendered in insert mode", inline.is_active(buf))
+    vim.cmd("stopinsert")
+
     inline.clear(buf)
   end)
 end)

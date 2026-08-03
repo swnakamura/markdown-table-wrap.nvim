@@ -10,6 +10,10 @@ local active_buffers = {}
 local active_tables = {}
 local active_configs = {}
 local view_offsets = {}
+-- Buffers currently rendered by the row-anchored replace mode (see the block
+-- comment above show_replace_aligned). Declared here because the window
+-- option handling below has to know about it.
+local aligned_tables = {}
 
 local function normalize_bufnr(bufnr)
   if not bufnr or bufnr == 0 then
@@ -183,6 +187,11 @@ local function cursor_in_tables(winid, tables)
 end
 
 local function should_disable_wrap(config, in_table)
+  -- Off by default: row-anchored replace mode reveals the raw source line
+  -- under the cursor and measures its soft-wrapped height to keep the table
+  -- height constant, and clearing 'wrap' would truncate that revealed row.
+  -- Opting in is a deliberate request for the hard-replace behaviour, so it
+  -- is honoured as-is -- the reveal degrades to a truncated row.
   if config.inline_mode ~= "replace" or config.inline_disable_wrap == false then
     return false
   end
@@ -208,6 +217,14 @@ local function restore_saved_wrap(winid)
   saved_wraps[winid] = nil
 end
 
+local function restore_saved_concealcursor(winid)
+  local previous = saved_concealcursors[winid]
+  if previous ~= nil and vim.api.nvim_win_is_valid(winid) then
+    vim.wo[winid].concealcursor = previous
+  end
+  saved_concealcursors[winid] = nil
+end
+
 local function set_render_window(winid, config, in_table)
   winid = winid or vim.api.nvim_get_current_win()
   if not vim.api.nvim_win_is_valid(winid) then
@@ -222,12 +239,18 @@ local function set_render_window(winid, config, in_table)
     vim.wo[winid].conceallevel = 2
   end
 
-  if saved_concealcursors[winid] == nil then
-    saved_concealcursors[winid] = vim.wo[winid].concealcursor
-  end
-  vim.wo[winid].concealcursor = "nvc"
-
+  -- 'concealcursor' follows the wrap decision, so by default it is left
+  -- untouched: the cursor line keeps unconcealing itself, which is exactly how
+  -- the revealed raw source row under the cursor works (and it keeps markdown
+  -- delimiters visible while editing instead of flickering on mode changes).
+  -- Once 'wrap' is turned off the rendering is a hard replace with no revealed
+  -- row, so the source under the cursor is concealed too.
   if should_disable_wrap(config, in_table) then
+    if saved_concealcursors[winid] == nil then
+      saved_concealcursors[winid] = vim.wo[winid].concealcursor
+    end
+    vim.wo[winid].concealcursor = "nvc"
+
     if saved_wraps[winid] == nil then
       saved_wraps[winid] = vim.wo[winid].wrap
     end
@@ -235,6 +258,7 @@ local function set_render_window(winid, config, in_table)
       vim.wo[winid].wrap = false
     end
   else
+    restore_saved_concealcursor(winid)
     restore_saved_wrap(winid)
   end
 end
@@ -253,12 +277,7 @@ local function restore_render_window(winid)
   end
   saved_conceallevels[winid] = nil
 
-  local previous_cursor = saved_concealcursors[winid]
-  if previous_cursor ~= nil and vim.api.nvim_win_is_valid(winid) then
-    vim.wo[winid].concealcursor = previous_cursor
-  end
-  saved_concealcursors[winid] = nil
-
+  restore_saved_concealcursor(winid)
   restore_saved_wrap(winid)
 end
 
@@ -299,8 +318,169 @@ local function view_offset(bufnr, table_info, source_count, rendered_count, conf
   return offset
 end
 
+-- Row-anchored replace mode, built on conceal_lines (nvim 0.11+).
+--
+-- Inline conceal cannot be used for table source lines: with 'wrap' on, a
+-- concealed line still occupies all of its soft-wrap screen rows, which
+-- showed up as mysterious blank lines under rendered rows. Instead every
+-- table source line is hidden entirely with conceal_lines (zero screen
+-- rows), and the rendered table hangs as virtual-line blocks:
+--
+--   - cursor inside the table: Neovim auto-reveals the raw cursor line (it
+--     soft-wraps naturally and carries the real cursor); the rendered rows
+--     above it are attached to it as virt_lines_above, the rows below as
+--     virt_lines below. The cursor row's own rendered lines are not drawn.
+--   - cursor outside the table: the whole rendered table is attached above
+--     the first line after the table (or below the line before it when the
+--     table ends the buffer).
+--
+-- virt_lines attached to a conceal_lines-hidden line are not displayed, so
+-- the blocks always anchor to a visible line.
+--
+-- The per-buffer state lives in `aligned_tables`, declared at the top of this
+-- file.
+
+local function slice(list, first, last)
+  local result = {}
+  for index = math.max(first, 1), math.min(last, #list) do
+    table.insert(result, list[index])
+  end
+  return result
+end
+
+-- (Re-)attach the rendered virtual-line blocks of one table. split is the
+-- 1-based group index of the cursor row, or nil when the cursor is outside.
+local function set_table_blocks(bufnr, entry, split)
+  for _, key in ipairs({ "above_id", "below_id" }) do
+    if entry[key] then
+      vim.api.nvim_buf_del_extmark(bufnr, namespace, entry[key])
+      entry[key] = nil
+    end
+  end
+
+  local function attach(row, lines, above)
+    if #lines == 0 then
+      return nil
+    end
+    return vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
+      virt_lines = lines,
+      virt_lines_above = above,
+      right_gravity = false,
+      priority = entry.priority,
+    })
+  end
+
+  -- A table spanning the entire buffer has no visible line outside itself to
+  -- anchor to; the cursor is then necessarily inside it, so fall back to
+  -- splitting at the first row.
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local has_outside_anchor = entry.end_row + 1 < line_count or entry.start_row > 0
+  if not split and not has_outside_anchor then
+    split = 1
+  end
+
+  if split then
+    local info = entry.group_index[split]
+    local row = entry.start_row + split - 1
+    entry.above_id = attach(row, slice(entry.flat, 1, info.content_start - 1), true)
+    entry.below_id = attach(row, slice(entry.flat, info.last + 1, #entry.flat), false)
+  elseif entry.end_row + 1 < line_count then
+    entry.above_id = attach(entry.end_row + 1, entry.flat, true)
+  else
+    entry.below_id = attach(entry.start_row - 1, entry.flat, false)
+  end
+
+  entry.split = split or false
+end
+
+-- Re-split the virtual-line blocks around the cursor row. Neovim itself
+-- reveals the raw source line under the cursor (conceal_lines is inactive on
+-- the cursor line), so no per-row extmark juggling is needed here.
+function M.update_reveal(bufnr)
+  bufnr = normalize_bufnr(bufnr)
+  local tables = aligned_tables[bufnr]
+  if not tables or vim.api.nvim_get_current_buf() ~= bufnr then
+    return
+  end
+
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+
+  for _, entry in pairs(tables) do
+    local split = nil
+    if row >= entry.start_row and row <= entry.end_row then
+      split = row - entry.start_row + 1
+    end
+
+    if entry.split ~= (split or false) then
+      set_table_blocks(bufnr, entry, split)
+    end
+  end
+end
+
+-- Row-anchored replace mode: each source line corresponds to its rendered
+-- row; the line under the cursor shows (and edits) as plain soft-wrapped
+-- markdown while every other row appears only in its rendered form.
+local function show_replace_aligned(bufnr, table_info, config, rendered)
+  local start_row = table_info.start_lnum - 1
+  local end_row = table_info.end_lnum - 1
+  local priority = config.overlay_priority or 10000
+
+  -- Flatten the rendered lines, remembering where each group's content
+  -- starts/ends so the blocks can be split around any source row. A group's
+  -- leading border belongs to the block above its row.
+  local flat = {}
+  local group_index = {}
+  local line_index = 0
+
+  for _, group in ipairs(rendered.groups) do
+    for _, line_obj in ipairs(group.leading or {}) do
+      line_index = line_index + 1
+      table.insert(flat, chunks_from_line_object(line_obj, line_index))
+    end
+
+    local content_start = #flat + 1
+    for _, line_obj in ipairs(group.lines) do
+      line_index = line_index + 1
+      table.insert(flat, chunks_from_line_object(line_obj, line_index))
+    end
+
+    table.insert(group_index, { content_start = content_start, last = #flat })
+  end
+
+  local entry = {
+    start_row = start_row,
+    end_row = end_row,
+    flat = flat,
+    group_index = group_index,
+    priority = priority,
+  }
+
+  for row = start_row, end_row do
+    vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
+      conceal_lines = "",
+      right_gravity = false,
+    })
+  end
+
+  aligned_tables[bufnr] = aligned_tables[bufnr] or {}
+  aligned_tables[bufnr][tostring(start_row)] = entry
+
+  set_table_blocks(bufnr, entry, nil)
+end
+
+local has_conceal_lines = vim.fn.has("nvim-0.11") == 1
+
 local function show_replace(bufnr, table_info, config, rendered)
   local source_count = table_info.end_lnum - table_info.start_lnum + 1
+  if
+    has_conceal_lines
+    and rendered.groups
+    and #rendered.groups == source_count
+    and not config.inline_viewport_scrolling
+  then
+    return show_replace_aligned(bufnr, table_info, config, rendered)
+  end
+
   local rendered_count = #rendered.lines
   local first_rendered = view_offset(bufnr, table_info, source_count, rendered_count, config)
   local overlay_count = math.min(source_count, rendered_count - first_rendered)
@@ -369,8 +549,12 @@ local function show_insert(bufnr, table_info, config, rendered)
   end
 end
 
-function M.clear(bufnr)
+-- opts.keep_window: skip restoring window options (conceallevel). Used for
+-- transient clears (visual mode) so the buffer-wide conceal appearance does
+-- not flicker between conceallevel values.
+function M.clear(bufnr, opts)
   bufnr = normalize_bufnr(bufnr)
+  opts = opts or {}
 
   if vim.api.nvim_buf_is_valid(bufnr) then
     vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
@@ -379,7 +563,10 @@ function M.clear(bufnr)
   active_buffers[bufnr] = nil
   active_tables[bufnr] = nil
   active_configs[bufnr] = nil
-  restore_render_for_buffer(bufnr)
+  aligned_tables[bufnr] = nil
+  if not opts.keep_window then
+    restore_render_for_buffer(bufnr)
+  end
 end
 
 function M.detach_window(winid)
@@ -431,6 +618,7 @@ function M.show(bufnr, table_info, config)
   if config.inline_mode == "replace" then
     set_render_for_buffer(bufnr, config)
   end
+  M.update_reveal(bufnr)
   return rendered
 end
 
@@ -449,6 +637,7 @@ function M.show_many(bufnr, tables, config)
   if config.inline_mode == "replace" then
     set_render_for_buffer(bufnr, config)
   end
+  M.update_reveal(bufnr)
   return rendered
 end
 

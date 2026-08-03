@@ -362,6 +362,57 @@ end
 function M.render_table(table_info, config)
   local chars = border_chars(config)
   local col_widths = distribute_widths(table_info, config)
+
+  -- Group rendered lines per source line so inline replace mode can anchor
+  -- each source row to the first visible line of its rendered row.
+  -- groups[1] = header source line, groups[2] = separator source line,
+  -- groups[2 + i] = body row i. Every group carries the source line it came
+  -- from, so the flat `source_lnums` list stays derivable from the grouping.
+  local groups = {}
+
+  local header_lines = render_row(table_info.header, col_widths, table_info.align, chars, config)
+  for _, line in ipairs(header_lines) do
+    line.is_header = true
+  end
+
+  table.insert(groups, {
+    source_lnum = table_info.start_lnum,
+    leading = { border_line(chars, chars.top_left, chars.top_join, chars.top_right, col_widths) },
+    lines = header_lines,
+  })
+
+  table.insert(groups, {
+    source_lnum = table_info.separator_lnum,
+    lines = { border_line(chars, chars.mid_left, chars.mid_join, chars.mid_right, col_widths) },
+  })
+
+  for row_index, row in ipairs(table_info.rows) do
+    local group = {
+      source_lnum = table_info.separator_lnum + row_index,
+      lines = render_row(row, col_widths, table_info.align, chars, config),
+    }
+
+    if config.row_separator and row_index < #table_info.rows then
+      table.insert(group.lines, row_separator_line(chars, col_widths))
+    end
+
+    if row_index == #table_info.rows then
+      table.insert(
+        group.lines,
+        border_line(chars, chars.bottom_left, chars.bottom_join, chars.bottom_right, col_widths)
+      )
+    end
+
+    table.insert(groups, group)
+  end
+
+  if #table_info.rows == 0 then
+    table.insert(
+      groups[2].lines,
+      border_line(chars, chars.bottom_left, chars.bottom_join, chars.bottom_right, col_widths)
+    )
+  end
+
   local lines = {}
   local source_lnums = {}
 
@@ -370,32 +421,21 @@ function M.render_table(table_info, config)
     table.insert(source_lnums, source_lnum)
   end
 
-  append(border_line(chars, chars.top_left, chars.top_join, chars.top_right, col_widths), table_info.start_lnum)
-
-  for _, line in ipairs(render_row(table_info.header, col_widths, table_info.align, chars, config)) do
-    line.is_header = true
-    append(line, table_info.start_lnum)
-  end
-
-  append(border_line(chars, chars.mid_left, chars.mid_join, chars.mid_right, col_widths), table_info.separator_lnum)
-
-  for row_index, row in ipairs(table_info.rows) do
-    local source_lnum = table_info.separator_lnum + row_index
-    for _, line in ipairs(render_row(row, col_widths, table_info.align, chars, config)) do
+  for _, group in ipairs(groups) do
+    local source_lnum = group.source_lnum or table_info.start_lnum
+    for _, line in ipairs(group.leading or {}) do
       append(line, source_lnum)
     end
-
-    if config.row_separator and row_index < #table_info.rows then
-      append(row_separator_line(chars, col_widths), source_lnum)
+    for _, line in ipairs(group.lines) do
+      append(line, source_lnum)
     end
   end
-
-  append(border_line(chars, chars.bottom_left, chars.bottom_join, chars.bottom_right, col_widths), table_info.end_lnum)
 
   return {
     lines = vim.tbl_map(text_of, lines),
     line_objects = lines,
     source_lnums = source_lnums,
+    groups = groups,
     width = table_width(col_widths),
     height = #lines,
     start_lnum = table_info.start_lnum,

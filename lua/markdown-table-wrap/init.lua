@@ -17,15 +17,29 @@ local defaults = {
   dim_source = true,
   auto_preview = true,
   render_all = true,
-  auto_preview_in_insert = false,
+  -- Keep tables rendered in insert mode: only the cursor row is revealed
+  -- (raw source), so entering insert no longer rewrites the whole screen.
+  auto_preview_in_insert = true,
   clear_on_cursor_leave = true,
-  clear_on_insert = true,
+  clear_on_insert = false,
+  -- Clear in visual mode so the selection is visible on raw source lines
+  -- (hidden/overlaid rows cannot show the selection highlight). The clear
+  -- keeps window options so conceal appearance doesn't flicker buffer-wide.
   clear_on_visual = true,
   debounce_ms = 80,
   overlay_priority = 10000,
   overlay_fill = true,
   inline_virtual_text = "overlay",
-  inline_disable_wrap = true,
+  -- Keep 'wrap' untouched so the revealed cursor row soft-wraps at the
+  -- window width like any other line. Concealed rows collapse to one screen
+  -- line, and overlays are window-fixed, so rendering doesn't need nowrap.
+  -- Set this to true to get the hard-replace behaviour instead: 'wrap' is
+  -- cleared while inline replace mode is active (and 'concealcursor' is set,
+  -- so the cursor row is concealed too and no raw row is revealed).
+  inline_disable_wrap = false,
+  -- Only consulted when inline_disable_wrap is true: "always" clears 'wrap'
+  -- while any table is rendered, "cursor" only while the cursor sits inside
+  -- one, "never" leaves it alone.
   inline_wrap_scope = "cursor",
   inline_viewport_scrolling = false,
   reader = {
@@ -851,6 +865,8 @@ local function create_autocmds()
       end
 
       require("markdown-table-wrap.inline").update_wrap_for_cursor(args.buf)
+      -- Reveal the raw source line under the cursor, restore the row left
+      require("markdown-table-wrap.inline").update_reveal(args.buf)
 
       if config_for_buffer(args.buf).render_all then
         return
@@ -917,7 +933,9 @@ local function create_autocmds()
       local visual = mode:match("^[vV\22]") ~= nil
 
       if visual then
-        require("markdown-table-wrap.inline").clear(bufnr)
+        -- keep_window: leave conceallevel in place so concealed markup
+        -- outside tables doesn't flicker while toggling visual mode
+        require("markdown-table-wrap.inline").clear(bufnr, { keep_window = true })
         if M.state.inline_buf == bufnr then
           M.state.inline_buf = nil
         end
@@ -933,7 +951,9 @@ local function create_autocmds()
   vim.api.nvim_create_autocmd({ "WinEnter", "BufWinEnter" }, {
     group = M.state.augroup,
     callback = function(args)
-      require("markdown-table-wrap.inline").attach_window(args.buf)
+      local inline = require("markdown-table-wrap.inline")
+      inline.attach_window(args.buf)
+      inline.update_reveal(args.buf)
     end,
   })
 

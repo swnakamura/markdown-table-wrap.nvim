@@ -118,7 +118,7 @@ return {
       overlay_priority = 10000,
       overlay_fill = true,
       inline_virtual_text = "overlay",
-      inline_disable_wrap = true,
+      inline_disable_wrap = false,
       inline_wrap_scope = "cursor",
       inline_viewport_scrolling = false,
       reader = {
@@ -338,7 +338,7 @@ require("markdown-table-wrap").setup({
   overlay_priority = 10000,
   overlay_fill = true,
   inline_virtual_text = "overlay",
-  inline_disable_wrap = true,
+  inline_disable_wrap = false,
   inline_wrap_scope = "cursor",
   inline_viewport_scrolling = false,
   reader = {
@@ -395,8 +395,8 @@ Options:
 - `overlay_priority`: extmark priority used to cover other renderers such as `render-markdown.nvim`.
 - `overlay_fill`: fill the rest of each rendered source line with blank overlay text so long source rows do not leak past the rendered table.
 - `inline_virtual_text`: `"overlay"` or `"win_col"` for the replace-mode virtual text strategy. The default `"overlay"` is the more portable path.
-- `inline_disable_wrap`: temporarily set `nowrap` in windows showing inline replace mode so long source rows do not soft-wrap underneath the rendered table.
-- `inline_wrap_scope`: controls where `inline_disable_wrap` applies. `"always"` keeps the window-wide `nowrap` behavior, `"cursor"` (the default) disables wrapping only while the cursor is inside a rendered table, and `"never"` leaves `wrap` fully under user control.
+- `inline_disable_wrap`: temporarily set `nowrap` in windows showing inline replace mode so long source rows do not soft-wrap underneath the rendered table. Default `false`: the rendered rows are concealed and collapse to one screen line, and the row under the cursor is revealed as raw source that must soft-wrap at the window width like any other line. Setting this to `true` opts into the hard-replace behavior instead — `'wrap'` is cleared and `'concealcursor'` is set, so nothing is revealed under the cursor.
+- `inline_wrap_scope`: controls where `inline_disable_wrap` applies, and is only consulted when it is `true`. `"always"` keeps the window-wide `nowrap` behavior, `"cursor"` (the default) disables wrapping only while the cursor is inside a rendered table, and `"never"` leaves `wrap` fully under user control.
 - `inline_viewport_scrolling`: when `true`, `:MarkdownTableScrollDown` and `:MarkdownTableScrollUp` page through rendered rows inside the original table height. The default is `false`, which shows the complete rendered table inline with extra virtual lines.
 - `highlight_preset`: `"default"`, `"tokyonight"`, `"catppuccin"`, `"render_markdown"`, `"auto"`, or any custom key supplied through `themes`/`theme_dir`. The default preset follows standard Neovim highlight groups so it fits arbitrary colorschemes without extra theme tuning.
 - `theme_dir`: optional directory containing custom theme files named `<preset>.lua`; the file name must match `highlight_preset`.
@@ -643,7 +643,9 @@ Enable `inline_viewport_scrolling = true` or use `:MarkdownTableToggleInlineView
 
 Inline replacement is built on Neovim extmarks, conceal, overlay virtual text, and optional virtual lines. That stack is consistent logically, but terminals and platforms can expose different visual edge cases when the original Markdown source line is longer than the window.
 
-Inline mode includes cross-platform hardening through `inline_virtual_text = "overlay"` and `inline_disable_wrap = true`. A concealed source row can still soft-wrap into extra screen lines on some terminal and platform combinations when cursor-scoped wrapping restores `wrap`; this can reveal fragments of the original Markdown. Use `inline_wrap_scope = "always"` for the strictest inline stability, or use reader mode to keep native prose wrapping without relying on conceal over soft-wrapped source rows.
+Inline mode includes cross-platform hardening through `inline_virtual_text = "overlay"`. On Neovim 0.11 or newer the source rows are removed from the screen with `conceal_lines`, so they cannot soft-wrap into extra screen lines and `inline_disable_wrap` can stay `false`, which is what lets the row under the cursor be revealed as raw soft-wrapping source.
+
+On older Neovim the rows are only concealed, and a concealed source row can soft-wrap into extra screen lines on some terminal and platform combinations, revealing fragments of the original Markdown. There, set `inline_disable_wrap = true` (with `inline_wrap_scope = "always"` for the strictest inline stability), or use reader mode to keep native prose wrapping without relying on conceal over soft-wrapped source rows.
 
 
 ## Project Structure

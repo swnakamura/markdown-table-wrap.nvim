@@ -59,3 +59,42 @@ h.test("wrap prefers punctuation boundaries and preserves link metadata", functi
   end
   h.assert_true("wrapped link remains highlighted", link_spans > 0)
 end)
+
+h.test("wrap never emits blank lines", function()
+  local markdown = require("markdown-table-wrap.markdown")
+  local wrap = require("markdown-table-wrap.wrap")
+
+  local cases = {
+    "スペース 混じり　全角スペースも　ある テキスト",
+    "   leading spaces word word",
+    "word  double  spaces here",
+    "trailing spaces   ",
+  }
+
+  for _, text in ipairs(cases) do
+    for _, limit in ipairs({ 8, 10, 12 }) do
+      local lines = wrap.wrap_cell(markdown.parse_inline(text), limit)
+      for index, line in ipairs(lines) do
+        h.assert_true(
+          string.format("no blank line %d for %q limit=%d", index, text, limit),
+          #lines == 1 or line.text:match("%S") ~= nil
+        )
+      end
+    end
+  end
+end)
+
+h.test("wrap breaks at ideographic spaces and trims them", function()
+  local markdown = require("markdown-table-wrap.markdown")
+  local wrap = require("markdown-table-wrap.wrap")
+  local lines = wrap.wrap_cell(markdown.parse_inline("最初の句　次の句　最後の句"), 8)
+
+  h.assert_true("wrapped into multiple lines", #lines >= 2)
+  for index, line in ipairs(lines) do
+    h.assert_true(
+      "line " .. index .. " has no leading space",
+      line.text:sub(1, 3) ~= "　" and line.text:sub(1, 1) ~= " "
+    )
+    h.assert_true("line " .. index .. " has no trailing ideographic space", line.text:sub(-3) ~= "　")
+  end
+end)
