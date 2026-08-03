@@ -218,15 +218,32 @@ h.test("parser rejects table syntax nested in block-level prefixes", function()
   local parser = require("markdown-table-wrap.parser")
 
   h.with_buffer({
-    "> A | B",
-    "> --- | ---",
-    "> one | two",
-    "",
     "- A | B",
     "  --- | ---",
+    "",
+    "    A | B",
+    "    --- | ---",
   }, function(buf)
     local tables = parser.parse_all(buf)
     h.assert_eq("nested block syntax not treated as top-level tables", #tables, 0)
+  end)
+end)
+
+-- Blockquotes are the one block-level prefix that does carry a table: the
+-- markers are stripped before parsing and redrawn by the renderer, so the
+-- quoted body is parsed exactly like a top-level one.
+h.test("parser reads a quoted table as a quoted table, not a top-level one", function()
+  local parser = require("markdown-table-wrap.parser")
+
+  h.with_buffer({
+    "> A | B",
+    "> --- | ---",
+    "> one | two",
+  }, function(buf)
+    local tables = parser.parse_all(buf)
+    h.assert_eq("quoted table collected", #tables, 1)
+    h.assert_eq("quoted table depth", tables[1].quote_depth, 1)
+    h.assert_eq("quoted table start", tables[1].start_lnum, 1)
   end)
 end)
 
@@ -362,5 +379,74 @@ h.test("parse_all reads the buffer once for large pipe-shaped prose", function()
 
     h.assert_eq("large document table count", #tables, 1)
     h.assert_eq("parse_all buffer reads", get_lines_calls, 1)
+  end)
+end)
+
+h.test("parser reads a table inside a blockquote", function()
+  local parser = require("markdown-table-wrap.parser")
+
+  h.with_buffer({
+    "> [!note] callout",
+    ">",
+    "> | A | B |",
+    "> | --- | --- |",
+    "> | x | y |",
+    "",
+  }, function(buf)
+    local parsed = parser.parse_at_cursor(buf, 5)
+    h.assert_true("quoted table parsed", parsed ~= nil)
+    h.assert_eq("quoted table start", parsed.start_lnum, 3)
+    h.assert_eq("quoted table end", parsed.end_lnum, 5)
+    h.assert_eq("quote depth", parsed.quote_depth, 1)
+    h.assert_eq("quote prefix", parsed.quote_prefix, "> ")
+    h.assert_eq("quoted header columns", #parsed.header, 2)
+    h.assert_eq("quoted header cell", parsed.header[1].text, "A")
+    h.assert_eq("quoted body cell", parsed.rows[1][2].text, "y")
+  end)
+end)
+
+h.test("parser keeps quote levels separate and finds quoted tables buffer-wide", function()
+  local parser = require("markdown-table-wrap.parser")
+
+  h.with_buffer({
+    "| A | B |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+    "",
+    "> | C | D |",
+    "> | --- | --- |",
+    "> | 3 | 4 |",
+    ">> | E | F |",
+    ">> | --- | --- |",
+    ">> | 5 | 6 |",
+  }, function(buf)
+    local tables = parser.parse_all(buf)
+    h.assert_eq("three tables", #tables, 3)
+    h.assert_eq("plain table depth", tables[1].quote_depth, 0)
+    h.assert_eq("quoted table depth", tables[2].quote_depth, 1)
+    h.assert_eq("quoted table end", tables[2].end_lnum, 7)
+    h.assert_eq("nested quote depth", tables[3].quote_depth, 2)
+    h.assert_eq("nested quote start", tables[3].start_lnum, 8)
+    h.assert_eq("nested cell", tables[3].rows[1][1].text, "5")
+  end)
+end)
+
+h.test("parser reads the callout kind of the enclosing blockquote", function()
+  local parser = require("markdown-table-wrap.parser")
+
+  h.with_buffer({
+    "> [!DONE] **passed**",
+    ">",
+    "> | A | B |",
+    "> | --- | --- |",
+    "> | x | y |",
+    "",
+    "> plain quote",
+    "> | C | D |",
+    "> | --- | --- |",
+    "> | 1 | 2 |",
+  }, function(buf)
+    h.assert_eq("callout kind", parser.parse_at_cursor(buf, 3).callout, "done")
+    h.assert_eq("plain quote has no callout", parser.parse_at_cursor(buf, 8).callout, nil)
   end)
 end)

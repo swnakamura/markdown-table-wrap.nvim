@@ -255,9 +255,85 @@ local function text_area_width()
   return math.max(1, vim.api.nvim_win_get_width(winid) - (info.textoff or 0))
 end
 
+-- Callout kinds and their severity, following render-markdown.nvim's callout
+-- table so a quoted table keeps the bar color of its callout ('> [!done]'
+-- stays green) instead of the plain quote color.
+local callout_severity = {
+  note = "info",
+  abstract = "info",
+  summary = "info",
+  tldr = "info",
+  info = "info",
+  todo = "info",
+  tip = "success",
+  hint = "success",
+  success = "success",
+  check = "success",
+  done = "success",
+  important = "hint",
+  example = "hint",
+  warning = "warn",
+  question = "warn",
+  help = "warn",
+  faq = "warn",
+  attention = "warn",
+  caution = "error",
+  failure = "error",
+  fail = "error",
+  missing = "error",
+  danger = "error",
+  error = "error",
+  bug = "error",
+}
+
+local severity_groups = {
+  info = "MarkdownTableWrapCalloutInfo",
+  success = "MarkdownTableWrapCalloutSuccess",
+  hint = "MarkdownTableWrapCalloutHint",
+  warn = "MarkdownTableWrapCalloutWarn",
+  error = "MarkdownTableWrapCalloutError",
+}
+
+-- Blockquote marker drawn in front of every rendered line of a quoted table,
+-- or nil for a plain table. The parser strips the source markers, so without
+-- this the rendered rows would escape their quote block.
+--
+-- "auto" follows render-markdown.nvim: when it is loaded it conceals '>' into
+-- its own quote bar, so the rendered rows use the same bar; otherwise the raw
+-- '>' marker is kept so the table matches the surrounding unrendered quotes.
+function M.quote_marker(table_info, config)
+  local depth = table_info and table_info.quote_depth or 0
+  if depth == 0 then
+    return nil
+  end
+
+  local icon = config.quote_icon
+  if icon == nil or icon == "auto" then
+    icon = package.loaded["render-markdown"] and "▋" or ">"
+  end
+
+  if not icon or icon == "" then
+    return nil
+  end
+
+  local severity = callout_severity[table_info.callout or ""]
+  local text = string.rep(icon .. " ", depth)
+
+  return {
+    text = text,
+    width = vim.api.nvim_strwidth(text),
+    hl_group = (severity and severity_groups[severity]) or "MarkdownTableWrapQuote",
+  }
+end
+
 local function distribute_widths(table_info, config)
   local columns = #table_info.header
-  local available = math.max(20, math.floor(text_area_width() * config.max_width_ratio))
+  -- The quote marker is drawn in front of every rendered line, so it eats into
+  -- the text area the table may occupy.
+  local marker = M.quote_marker(table_info, config)
+  local marker_width = marker and marker.width or 0
+  local window_budget = math.floor(text_area_width() * config.max_width_ratio)
+  local available = math.max(20, window_budget - marker_width)
   local border_cost = 1 + (columns * 3)
   local content_budget = math.max(columns, available - border_cost)
   local effective_min = config.min_col_width
@@ -386,19 +462,23 @@ function M.render_table(table_info, config)
     lines = { border_line(chars, chars.mid_left, chars.mid_join, chars.mid_right, col_widths) },
   })
 
+  -- Separators under a row live in `trailing`, not `lines`: inline replace
+  -- mode keeps them visible while the row itself is revealed under the
+  -- cursor, so the boundary to the next row never disappears.
   for row_index, row in ipairs(table_info.rows) do
     local group = {
       source_lnum = table_info.separator_lnum + row_index,
       lines = render_row(row, col_widths, table_info.align, chars, config),
+      trailing = {},
     }
 
     if config.row_separator and row_index < #table_info.rows then
-      table.insert(group.lines, row_separator_line(chars, col_widths))
+      table.insert(group.trailing, row_separator_line(chars, col_widths))
     end
 
     if row_index == #table_info.rows then
       table.insert(
-        group.lines,
+        group.trailing,
         border_line(chars, chars.bottom_left, chars.bottom_join, chars.bottom_right, col_widths)
       )
     end
@@ -407,10 +487,7 @@ function M.render_table(table_info, config)
   end
 
   if #table_info.rows == 0 then
-    table.insert(
-      groups[2].lines,
-      border_line(chars, chars.bottom_left, chars.bottom_join, chars.bottom_right, col_widths)
-    )
+    groups[2].trailing = { border_line(chars, chars.bottom_left, chars.bottom_join, chars.bottom_right, col_widths) }
   end
 
   local lines = {}
@@ -429,6 +506,9 @@ function M.render_table(table_info, config)
     for _, line in ipairs(group.lines) do
       append(line, source_lnum)
     end
+    for _, line in ipairs(group.trailing or {}) do
+      append(line, source_lnum)
+    end
   end
 
   return {
@@ -436,6 +516,7 @@ function M.render_table(table_info, config)
     line_objects = lines,
     source_lnums = source_lnums,
     groups = groups,
+    quote = M.quote_marker(table_info, config),
     width = table_width(col_widths),
     height = #lines,
     start_lnum = table_info.start_lnum,

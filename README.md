@@ -36,6 +36,7 @@ Floating preview for long table reading:
 
 - Automatic Markdown-only rendering; commands are optional controls.
 - Detects supported top-level GFM pipe tables in the current Markdown document.
+- Renders pipe tables inside blockquotes (including callouts and nested `>` levels) in place, with the quote marker redrawn in front of every rendered row and colored by the callout kind (`> [!done]` keeps its green bar).
 - Parses header, separator, alignment, and body rows.
 - Computes available width from the current window.
 - Accounts for number, sign, and fold columns when fitting the table.
@@ -123,6 +124,7 @@ return {
       inline_viewport_scrolling = false,
       inline_line_numbers = true,
       inline_stable_height = true,
+      quote_icon = "auto",
       reader = {
         auto_open = "has_table",
         wrap = true,
@@ -273,6 +275,8 @@ return {
 }
 ```
 
+Blockquoted tables work with this setup as well. Callout bars keep their severity color: the marker uses `callout_info`, `callout_success`, `callout_hint`, `callout_warn`, or `callout_error` depending on the `[!kind]` of the enclosing quote, and plain quotes use `quote`. The default preset links those to the `Diagnostic*` groups, which is what `render-markdown.nvim` colors its own callouts with. The table's source lines are hidden entirely, so `render-markdown.nvim` never draws its quote bar on them; the rendered rows carry the marker themselves, and `quote_icon = "auto"` picks the same `▋` bar so the quote block stays visually continuous. The `render_markdown` highlight preset links the marker to `RenderMarkdownQuote`.
+
 ## Commands
 
 You do not need commands for normal use. With `auto_preview = true`, Reader
@@ -345,6 +349,7 @@ require("markdown-table-wrap").setup({
   inline_viewport_scrolling = false,
   inline_line_numbers = true,
   inline_stable_height = true,
+  quote_icon = "auto",
   reader = {
     auto_open = "has_table",
     wrap = true,
@@ -404,6 +409,7 @@ Options:
 - `inline_viewport_scrolling`: when `true`, `:MarkdownTableScrollDown` and `:MarkdownTableScrollUp` page through rendered rows inside the original table height. The default is `false`, which shows the complete rendered table inline with extra virtual lines.
 - `inline_line_numbers`: draw the window's line numbers into the rendered table rows in row-anchored replace mode (virtual lines cannot receive native line numbers). Each source row's number appears on the first rendered line of that row, using the `LineNr` highlight. Shown only when the window has `'number'` or `'relativenumber'` set; with `'relativenumber'` the distance to the cursor row is shown and updates as the cursor moves. Default `true`.
 - `inline_stable_height`: pad the revealed cursor row with blank virtual lines so the table keeps a constant total screen height while the cursor moves between its rows. Without it, every move swaps a rendered row for the raw soft-wrapped source line (usually a different height), reflowing the rest of the table and everything below it. Default `true`.
+- `quote_icon`: marker drawn in front of every rendered line of a table inside a blockquote, once per quote level, using the `quote` highlight. `"auto"` (default) draws `render-markdown.nvim`'s quote bar `▋` when that plugin is loaded and the raw `>` otherwise; set it to any string to fix the marker, or to `false` to draw no marker. Rendered tables are narrowed by the marker width so they stay inside the quote block.
 - `highlight_preset`: `"default"`, `"tokyonight"`, `"catppuccin"`, `"render_markdown"`, `"auto"`, or any custom key supplied through `themes`/`theme_dir`. The default preset follows standard Neovim highlight groups so it fits arbitrary colorschemes without extra theme tuning.
 - `theme_dir`: optional directory containing custom theme files named `<preset>.lua`; the file name must match `highlight_preset`.
 - `themes`: inline custom theme table keyed by `highlight_preset`.
@@ -449,6 +455,8 @@ require("markdown-table-wrap").setup({
     strike = { fg = "#f7768e", strikethrough = true },
     mark = { fg = "#1a1b26", bg = "#e0af68" },
     link = { fg = "#7dcfff", underline = true },
+    quote = { fg = "#565f89" },
+    callout_success = { fg = "#9ece6a" },
   },
 })
 ```

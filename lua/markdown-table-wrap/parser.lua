@@ -207,6 +207,49 @@ local function is_tableish_line(line)
   return line and trim(line) ~= "" and has_unescaped_pipe(line)
 end
 
+-- Blockquote support: a table may sit inside one or more '>' levels. The
+-- markers are stripped before parsing and drawn back by the renderer, so all
+-- lines of one table must share the same quote depth. Returns the literal
+-- marker prefix, the line body after it, and the quote depth.
+local function split_quote(line)
+  line = line or ""
+  local prefix_end = 0
+  local depth = 0
+  local index = 1
+
+  while true do
+    local _, marker_end = line:find("^[ \t]*>[ \t]?", index)
+    if not marker_end then
+      break
+    end
+    depth = depth + 1
+    prefix_end = marker_end
+    index = marker_end + 1
+  end
+
+  return line:sub(1, prefix_end), line:sub(prefix_end + 1), depth
+end
+
+M.split_quote = split_quote
+
+-- Every buffer line split once into quote prefix, body and depth, so the rest
+-- of the parser works on the quoted bodies while the renderer can still redraw
+-- the markers it stripped.
+local function split_quote_lines(lines)
+  local prefixes = {}
+  local bodies = {}
+  local depths = {}
+
+  for index = 1, #lines do
+    local prefix, body, depth = split_quote(lines[index])
+    prefixes[index] = prefix
+    bodies[index] = body
+    depths[index] = depth
+  end
+
+  return { count = #lines, prefixes = prefixes, bodies = bodies, depths = depths }
+end
+
 local function starts_atx_heading(content)
   local hashes = content:match("^(#+)")
   if not hashes or #hashes > 6 then
@@ -357,12 +400,38 @@ local function normalize_row(row, count)
   return normalized
 end
 
-local function parse_table_at(lines, start_lnum)
-  local header_line = lines[start_lnum]
-  local separator_line = lines[start_lnum + 1]
+-- Callout kind ("done", "warning", ...) of the blockquote holding the table,
+-- or nil for a plain quote. The marker sits on the first line of the quote
+-- block at this depth, which is found by walking up from the table until the
+-- quote ends (a shallower line, or no quote at all).
+local function callout_kind(quote, start_lnum, depth)
+  if depth == 0 then
+    return nil
+  end
+
+  local first = nil
+  for lnum = start_lnum - 1, 1, -1 do
+    local line_depth = quote.depths[lnum]
+    if line_depth < depth then
+      break
+    end
+    if line_depth == depth then
+      first = quote.bodies[lnum]
+    end
+  end
+
+  local kind = first and first:match("^%s*%[!([%w_-]+)%]")
+  return kind and kind:lower() or nil
+end
+
+local function parse_table_at(quote, start_lnum)
+  local depth = quote.depths[start_lnum]
+  local header_line = quote.bodies[start_lnum]
+  local separator_line = quote.bodies[start_lnum + 1]
 
   if
     not separator_line
+    or quote.depths[start_lnum + 1] ~= depth
     or not is_tableish_line(header_line)
     or starts_block(header_line)
     or starts_block(separator_line)
@@ -391,9 +460,9 @@ local function parse_table_at(lines, start_lnum)
   local end_lnum = start_lnum + 1
   local lnum = start_lnum + 2
 
-  while lnum <= #lines do
-    local line = lines[lnum]
-    if trim(line) == "" or starts_block(line) then
+  while lnum <= quote.count do
+    local line = quote.bodies[lnum]
+    if quote.depths[lnum] ~= depth or trim(line) == "" or starts_block(line) then
       break
     end
 
@@ -406,6 +475,9 @@ local function parse_table_at(lines, start_lnum)
     start_lnum = start_lnum,
     separator_lnum = start_lnum + 1,
     end_lnum = end_lnum,
+    quote_depth = depth,
+    quote_prefix = quote.prefixes[start_lnum],
+    callout = callout_kind(quote, start_lnum, depth),
     header = normalize_row(header, #header),
     align = align,
     rows = rows,
@@ -413,20 +485,32 @@ local function parse_table_at(lines, start_lnum)
 end
 
 local function parse_lines(lines, stop_lnum)
+  local quote = split_quote_lines(lines)
   local tables = {}
   local fenced_lines = {}
   local fence_char = nil
   local fence_length = nil
+  local fence_depth = nil
   local lnum = 1
 
-  while lnum <= #lines and (not stop_lnum or lnum <= stop_lnum) do
-    local line = lines[lnum]
+  while lnum <= quote.count and (not stop_lnum or lnum <= stop_lnum) do
+    local line = quote.bodies[lnum]
+    local depth = quote.depths[lnum]
+
+    -- A fence lives inside one quote level; leaving that level ends it instead
+    -- of swallowing the rest of the document.
+    if fence_char and depth ~= fence_depth then
+      fence_char = nil
+      fence_length = nil
+      fence_depth = nil
+    end
 
     if fence_char then
       fenced_lines[lnum] = true
       if is_fence_closer(line, fence_char, fence_length) then
         fence_char = nil
         fence_length = nil
+        fence_depth = nil
       end
       lnum = lnum + 1
     else
@@ -435,9 +519,10 @@ local function parse_lines(lines, stop_lnum)
         fenced_lines[lnum] = true
         fence_char = opener_char
         fence_length = opener_length
+        fence_depth = depth
         lnum = lnum + 1
       else
-        local table_info = parse_table_at(lines, lnum)
+        local table_info = parse_table_at(quote, lnum)
         if table_info then
           table.insert(tables, table_info)
           lnum = table_info.end_lnum + 1
@@ -465,7 +550,7 @@ function M.parse_at_cursor(bufnr, cursor_lnum)
     return nil, "MarkdownTableWrap: cursor is inside a fenced code block."
   end
 
-  local current = lines[cursor_lnum] or ""
+  local _, current = split_quote(lines[cursor_lnum] or "")
   if not is_tableish_line(current) then
     return nil, "MarkdownTableWrap: cursor is not inside a Markdown pipe table."
   end

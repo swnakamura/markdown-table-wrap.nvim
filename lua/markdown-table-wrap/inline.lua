@@ -144,10 +144,19 @@ local function chunks_from_line_object(line_obj, line_index)
   return result
 end
 
-local function padded_chunks(line_obj, line_index, target_width)
+-- Rendered lines of a quoted table carry the blockquote marker themselves:
+-- the parser strips it from the source, and the source lines are hidden.
+local function quoted(chunks, quote)
+  if quote then
+    table.insert(chunks, 1, { quote.text, quote.hl_group })
+  end
+  return chunks
+end
+
+local function padded_chunks(line_obj, line_index, target_width, quote)
   local line = type(line_obj) == "table" and line_obj.text or line_obj
-  local chunks = chunks_from_line_object(line_obj, line_index)
-  local missing = math.max(0, target_width - vim.api.nvim_strwidth(line))
+  local chunks = quoted(chunks_from_line_object(line_obj, line_index), quote)
+  local missing = math.max(0, target_width - vim.api.nvim_strwidth(line) - (quote and quote.width or 0))
 
   if missing > 0 then
     append_chunk(chunks, string.rep(" ", missing), "MarkdownTableWrapBlank")
@@ -156,12 +165,12 @@ local function padded_chunks(line_obj, line_index, target_width)
   return chunks
 end
 
-local function virt_lines(lines, start_index)
+local function virt_lines(lines, start_index, quote)
   local result = {}
   start_index = start_index or 1
 
   for index, line in ipairs(lines) do
-    table.insert(result, chunks_from_line_object(line, start_index + index - 1))
+    table.insert(result, quoted(chunks_from_line_object(line, start_index + index - 1), quote))
   end
 
   return result
@@ -465,9 +474,17 @@ local function set_table_blocks(bufnr, entry, split)
   local function attach(row, first, last, above, filler)
     local lines = {}
     -- The filler leads the block: it sits directly under the revealed raw
-    -- line, so the rendered lines that follow stay on fixed screen rows.
+    -- line, so the rendered lines that follow stay on fixed screen rows. It
+    -- keeps the number column and the blockquote marker so neither breaks up.
     for _ = 1, filler or 0 do
-      table.insert(lines, column and { { string.rep(" ", column.textoff), "LineNr" } } or {})
+      local blank = {}
+      if column then
+        table.insert(blank, { string.rep(" ", column.textoff), "LineNr" })
+      end
+      if entry.quote then
+        table.insert(blank, { entry.quote.text, entry.quote.hl_group })
+      end
+      table.insert(lines, blank)
     end
 
     for index = math.max(first, 1), math.min(last, #source) do
@@ -499,7 +516,7 @@ local function set_table_blocks(bufnr, entry, split)
     local info = entry.group_index[split]
     local row = entry.start_row + split - 1
     entry.above_id = attach(row, 1, info.content_start - 1, true)
-    entry.below_id = attach(row, info.last + 1, #entry.flat, false, stable_filler(winid, entry, split))
+    entry.below_id = attach(row, info.content_last + 1, #entry.flat, false, stable_filler(winid, entry, split))
   elseif entry.end_row + 1 < line_count then
     entry.above_id = attach(entry.end_row + 1, 1, #entry.flat, true)
   else
@@ -543,6 +560,18 @@ function M.update_reveal(bufnr)
       set_table_blocks(bufnr, entry, split)
     end
 
+    if split == 1 and entry.start_row == 0 then
+      -- Neovim never draws virt_lines above the first buffer line on its
+      -- own; they only appear as topfill rows when scrolled into view. With
+      -- the cursor on line 1 the topline is pinned there, so the block
+      -- above the revealed row (the table's top border) would silently
+      -- vanish. Force the fill so it stays visible.
+      local fill = entry.group_index[1].content_start - 1
+      if fill > 0 and vim.fn.winsaveview().topfill < fill then
+        vim.fn.winrestview({ topline = 1, topfill = fill })
+      end
+    end
+
     if not split and split_changed then
       -- While the cursor is inside the table the topline usually sits on
       -- the revealed source row (scrolled topfill rows into the virtual
@@ -577,7 +606,8 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
 
   -- Flatten the rendered lines, remembering where each group's content
   -- starts/ends so the blocks can be split around any source row. A group's
-  -- leading border belongs to the block above its row. flat_lnums maps each
+  -- leading border belongs to the block above its row and its trailing
+  -- separators to the block below it. flat_lnums maps each
   -- flat line to its source line number (first content line of a group) or
   -- false (border/continuation lines).
   local flat = {}
@@ -588,18 +618,27 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
   for group_number, group in ipairs(rendered.groups) do
     for _, line_obj in ipairs(group.leading or {}) do
       line_index = line_index + 1
-      table.insert(flat, chunks_from_line_object(line_obj, line_index))
+      table.insert(flat, quoted(chunks_from_line_object(line_obj, line_index), rendered.quote))
       table.insert(flat_lnums, false)
     end
 
     local content_start = #flat + 1
     for offset, line_obj in ipairs(group.lines) do
       line_index = line_index + 1
-      table.insert(flat, chunks_from_line_object(line_obj, line_index))
+      table.insert(flat, quoted(chunks_from_line_object(line_obj, line_index), rendered.quote))
       table.insert(flat_lnums, offset == 1 and (start_row + group_number) or false)
     end
+    local content_last = #flat
 
-    table.insert(group_index, { content_start = content_start, last = #flat })
+    -- Trailing separators stay visible while this row is revealed, so they
+    -- belong to the below block, not the hidden content range.
+    for _, line_obj in ipairs(group.trailing or {}) do
+      line_index = line_index + 1
+      table.insert(flat, quoted(chunks_from_line_object(line_obj, line_index), rendered.quote))
+      table.insert(flat_lnums, false)
+    end
+
+    table.insert(group_index, { content_start = content_start, content_last = content_last })
   end
 
   -- Per-row data for the stable-height filler: display width of each raw
@@ -610,7 +649,7 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
   local source_lines = vim.api.nvim_buf_get_lines(bufnr, start_row, end_row + 1, false)
   for index, info in ipairs(group_index) do
     row_widths[index] = vim.fn.strdisplaywidth(source_lines[index] or "")
-    group_lines[index] = info.last - info.content_start + 1
+    group_lines[index] = info.content_last - info.content_start + 1
   end
 
   local entry = {
@@ -622,6 +661,7 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
     priority = priority,
     show_numbers = config.inline_line_numbers ~= false,
     stable_height = config.inline_stable_height ~= false,
+    quote = rendered.quote,
     row_widths = row_widths,
     group_lines = group_lines,
   }
@@ -669,7 +709,7 @@ local function show_replace(bufnr, table_info, config, rendered)
   for source_offset = 0, overlay_count - 1 do
     local line_obj = (rendered.line_objects or rendered.lines)[first_rendered + source_offset + 1]
     local mark = {
-      virt_text = padded_chunks(line_obj, first_rendered + source_offset + 1, overlay_width),
+      virt_text = padded_chunks(line_obj, first_rendered + source_offset + 1, overlay_width, rendered.quote),
       hl_mode = "replace",
       right_gravity = false,
       priority = priority,
@@ -691,7 +731,7 @@ local function show_replace(bufnr, table_info, config, rendered)
     end
 
     vim.api.nvim_buf_set_extmark(bufnr, namespace, table_info.end_lnum - 1, 0, {
-      virt_lines = virt_lines(extra, overlay_count + 1),
+      virt_lines = virt_lines(extra, overlay_count + 1, rendered.quote),
       virt_lines_above = false,
       right_gravity = false,
       priority = priority,
@@ -704,7 +744,7 @@ local function show_insert(bufnr, table_info, config, rendered)
   local above = config.inline_position ~= "below"
 
   vim.api.nvim_buf_set_extmark(bufnr, namespace, target_line, 0, {
-    virt_lines = virt_lines(rendered.line_objects or rendered.lines),
+    virt_lines = virt_lines(rendered.line_objects or rendered.lines, 1, rendered.quote),
     virt_lines_above = above,
     right_gravity = false,
     priority = 200,

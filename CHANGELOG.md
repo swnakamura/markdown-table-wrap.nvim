@@ -2,6 +2,23 @@
 
 All notable changes to `markdown-table-wrap.nvim` are documented here.
 
+## Unreleased
+
+### Added
+
+- Render pipe tables inside blockquotes, including callouts and nested `>` levels. Quote markers are stripped before parsing and redrawn in front of every rendered line with the new `MarkdownTableWrapQuote` highlight, and the rendered table is narrowed by the marker width so it stays inside the quote block. The marker follows the callout kind of the enclosing quote, so `> [!done]` keeps its green bar (`MarkdownTableWrapCallout{Info,Success,Hint,Warn,Error}`, linked to the `Diagnostic*` groups by default).
+- `quote_icon` option controlling that marker: `"auto"` (default) follows render-markdown.nvim's quote bar when that plugin is loaded and uses the raw `>` otherwise, any string fixes the marker, and `false` draws none.
+- `inline_line_numbers` (default `true`) draws window line numbers into rendered Inline table rows, honouring `'number'` and `'relativenumber'` and updating as the cursor moves.
+- `inline_stable_height` (default `true`) pads the revealed cursor row with blank virtual lines so an Inline table keeps a constant screen height while the cursor moves through it.
+
+### Changed
+
+- `inline_disable_wrap` now defaults to `false`. Rendered source rows are removed from the screen with `conceal_lines` on Neovim 0.11 or newer, so they cannot soft-wrap underneath the rendered table, and `'wrap'` has to stay on for the raw source row revealed under the cursor. Setting it to `true` still opts into the previous hard-replace behaviour, which also sets `'concealcursor'` so no row is revealed. `inline_wrap_scope` is only consulted when it is `true`.
+
+### Fixed
+
+- Table cell navigation now skips the blockquote markers instead of treating them as a leading cell.
+
 ## 0.2.3 - Inline Rendering Corrections
 
 ### Fixed

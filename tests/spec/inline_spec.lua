@@ -870,3 +870,51 @@ h.test("table link opener falls back to the only parsed table link", function()
 
   vim.ui.open = original_open
 end)
+
+h.test("inline render draws the blockquote marker in front of rendered rows", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    preview_mode = "inline",
+    debounce_ms = 0,
+    render_all = true,
+    auto_preview = true,
+    max_col_width = 80,
+    inline_line_numbers = false,
+    quote_icon = ">",
+  })
+
+  h.with_buffer({
+    "> | A | B |",
+    "> | --- | --- |",
+    "> | x | y |",
+    "",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    plugin.refresh_auto({ force = true })
+
+    local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
+    local seen = false
+
+    for _, mark in ipairs(marks) do
+      for _, line in ipairs(mark[4].virt_lines or {}) do
+        seen = true
+        h.assert_eq("quote marker text", line[1][1], "> ")
+        h.assert_eq("quote marker highlight", line[1][2], "MarkdownTableWrapQuote")
+      end
+    end
+
+    h.assert_true("rendered virtual lines exist", seen)
+    inline.clear(buf)
+  end)
+end)
+
+h.test("quoted table navigation skips the quote marker", function()
+  local nav = require("markdown-table-wrap.nav")
+
+  local spans = nav.spans("> | ab | cd |")
+  h.assert_eq("quoted cell count", #spans, 2)
+  h.assert_eq("first quoted cell", ("> | ab | cd |"):sub(spans[1].start_col + 1, spans[1].end_col), "ab")
+  h.assert_eq("second quoted cell", ("> | ab | cd |"):sub(spans[2].start_col + 1, spans[2].end_col), "cd")
+end)

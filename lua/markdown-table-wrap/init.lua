@@ -51,6 +51,11 @@ local defaults = {
   -- Without this, every move swaps a rendered row for the raw soft-wrapped
   -- source line (different heights), reflowing everything below the table.
   inline_stable_height = true,
+  -- Blockquote (">") tables are rendered inside their quote block; this is
+  -- the marker drawn in front of every rendered line, once per quote level.
+  -- "auto" uses render-markdown.nvim's quote bar when that plugin is loaded
+  -- and the raw ">" otherwise; set to false to draw no marker.
+  quote_icon = "auto",
   reader = {
     auto_open = "has_table",
     wrap = true,
@@ -240,6 +245,10 @@ local function validate_config()
     M.config.link.custom = vim.deepcopy(defaults.link.custom)
   end
 
+  if M.config.quote_icon ~= false and type(M.config.quote_icon) ~= "string" then
+    M.config.quote_icon = defaults.quote_icon
+  end
+
   if M.config.inline_virtual_text ~= "overlay" and M.config.inline_virtual_text ~= "win_col" then
     M.config.inline_virtual_text = defaults.inline_virtual_text
   end
@@ -415,6 +424,8 @@ local function table_signature(bufnr, table_info, config)
     tostring(config.inline_viewport_scrolling),
     tostring(config.inline_line_numbers),
     tostring(config.inline_stable_height),
+    tostring(config.quote_icon),
+    tostring(table_info.callout),
     table.concat(lines, "\n"),
   }, "\31")
 end
@@ -438,6 +449,7 @@ local function all_tables_signature(bufnr, tables, config)
     tostring(config.inline_viewport_scrolling),
     tostring(config.inline_line_numbers),
     tostring(config.inline_stable_height),
+    tostring(config.quote_icon),
   }
 
   for _, table_info in ipairs(tables) do

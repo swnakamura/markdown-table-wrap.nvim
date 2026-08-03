@@ -125,3 +125,22 @@ h.test("theme presets and overrides", function()
   vim.api.nvim_set_hl(0, "Normal", previous_normal)
   vim.api.nvim_set_hl(0, "Title", previous_title)
 end)
+
+h.test("callout quote markers use the matching severity highlight", function()
+  local parser = require("markdown-table-wrap.parser")
+  local render = require("markdown-table-wrap.render")
+
+  h.with_buffer({
+    "> [!done] passed",
+    "> | A | B |",
+    "> | --- | --- |",
+    "> | x | y |",
+  }, function(buf)
+    local config = { quote_icon = ">" }
+    local marker = render.quote_marker(parser.parse_at_cursor(buf, 2), config)
+    h.assert_eq("callout marker highlight", marker.hl_group, "MarkdownTableWrapCalloutSuccess")
+
+    local plain = render.quote_marker({ quote_depth = 1 }, config)
+    h.assert_eq("plain quote marker highlight", plain.hl_group, "MarkdownTableWrapQuote")
+  end)
+end)

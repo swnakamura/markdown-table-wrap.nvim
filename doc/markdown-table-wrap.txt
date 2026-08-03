@@ -264,6 +264,7 @@ Default setup:
     inline_disable_wrap = false,
     inline_wrap_scope = "cursor",
     inline_viewport_scrolling = false,
+    quote_icon = "auto",
     reader = {
       auto_open = "has_table",
       wrap = true,
@@ -375,6 +376,16 @@ auto_preview~
 render_all~
     Render all tables in the current Markdown buffer.
 
+quote_icon~                           *markdown-table-wrap-quote-icon*
+    Marker drawn in front of every rendered line of a table inside a
+    blockquote, once per quote level, using the "quote" highlight. "auto"
+    draws render-markdown.nvim's quote bar when that plugin is loaded and the
+    raw ">" otherwise. Any string fixes the marker; false draws none. The
+    rendered table is narrowed by the marker width so it stays inside the
+    quote block. The marker follows the callout kind of the enclosing quote
+    ("quote", or "callout_info", "callout_success", "callout_hint",
+    "callout_warn", "callout_error"), so "> [!done]" keeps its green bar.
+
 highlight_preset~                  *markdown-table-wrap-highlight-preset*
     "default", "tokyonight", "catppuccin", "render_markdown", "auto", or a
     custom key supplied through |markdown-table-wrap-themes| or
@@ -473,6 +484,12 @@ Highlight groups:
 - MarkdownTableWrapWikiLink
 - MarkdownTableWrapImage
 - MarkdownTableWrapMark
+- MarkdownTableWrapQuote
+- MarkdownTableWrapCalloutInfo
+- MarkdownTableWrapCalloutSuccess
+- MarkdownTableWrapCalloutHint
+- MarkdownTableWrapCalloutWarn
+- MarkdownTableWrapCalloutError
 - MarkdownTableWrapBlank
 
 Semantic highlight groups are reapplied after ColorScheme. A direct custom
@@ -515,6 +532,14 @@ To avoid double table rendering, disable render-markdown.nvim pipe tables:
   }
 <
 
+Blockquoted tables work with this setup too. Their source lines are hidden
+entirely, so render-markdown.nvim never draws its quote bar on them; the
+rendered rows carry the marker themselves and the "auto" setting of
+|markdown-table-wrap-quote-icon| picks the same bar. Callout bars keep their
+severity color; the default preset links to the Diagnostic* groups, which is
+what render-markdown.nvim colors callouts with, and the render_markdown preset
+links to its RenderMarkdown* groups.
+
 ==============================================================================
 LIMITATIONS                                *markdown-table-wrap-limitations*
 
@@ -530,8 +555,9 @@ LIMITATIONS                                *markdown-table-wrap-limitations*
   some terminal setups. Reader mode avoids this extmark/wrap interaction
   entirely.
 - Treesitter-aware table discovery is not implemented yet.
-- Container-prefixed tables nested inside blockquotes or lists are not
-  implemented yet. Container starts safely terminate a top-level table.
+- Container-prefixed tables nested inside lists are not implemented yet. Such
+  container starts safely terminate a top-level table. Blockquoted tables are
+  supported; see |markdown-table-wrap-quote-icon|.
 - The plugin focuses on Markdown pipe tables and does not replace general
   Markdown rendering.
 

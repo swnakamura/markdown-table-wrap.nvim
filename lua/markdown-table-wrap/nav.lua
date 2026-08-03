@@ -89,7 +89,7 @@ local function trim_span(line, left, right)
   return left, right
 end
 
-local function cell_spans(line)
+local function body_spans(line)
   local pipes = pipe_positions(line)
   if #pipes == 0 then
     return {}
@@ -119,6 +119,23 @@ local function cell_spans(line)
         start_col = math.max(text_left - 1, 0),
         end_col = math.max(text_right, 0),
       })
+    end
+  end
+
+  return spans
+end
+
+-- Cell spans in buffer columns. A table inside a blockquote keeps its '>'
+-- markers in the source, so they are skipped before splitting on pipes and
+-- their byte length is added back to every span.
+local function cell_spans(line)
+  local prefix, body = require("markdown-table-wrap.parser").split_quote(line)
+  local spans = body_spans(body)
+
+  if #prefix > 0 then
+    for _, span in ipairs(spans) do
+      span.start_col = span.start_col + #prefix
+      span.end_col = span.end_col + #prefix
     end
   end
 
