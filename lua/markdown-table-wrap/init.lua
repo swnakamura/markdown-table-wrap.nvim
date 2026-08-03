@@ -11,7 +11,11 @@ local defaults = {
   use_unicode_border = true,
   table_border = "rounded",
   row_separator = true,
-  preview_mode = "reader",
+  -- Render in place, inside the user's own buffer: the source stays editable
+  -- and the row under the cursor is revealed as raw markdown. Reader mode
+  -- (a separate, non-modifiable scratch buffer) is available on request with
+  -- preview_mode = "reader" or :MarkdownTableReader.
+  preview_mode = "inline",
   inline_mode = "replace",
   inline_position = "above",
   dim_source = true,

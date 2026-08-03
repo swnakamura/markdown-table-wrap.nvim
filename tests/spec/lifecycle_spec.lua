@@ -281,7 +281,9 @@ h.test("reader auto-open requires a table but explicit Reader still opens", func
   local plugin = require("markdown-table-wrap")
   local reader = require("markdown-table-wrap.reader")
 
-  plugin.setup({ debounce_ms = 0 })
+  -- Reader is opt-in (the default preview mode is "inline"), so the auto-open
+  -- policy under test only applies once reader mode is requested.
+  plugin.setup({ debounce_ms = 0, preview_mode = "reader" })
 
   h.with_buffer({ "# Notes", "", "No table in this document." }, function(source_buf)
     vim.bo[source_buf].filetype = "markdown"
@@ -298,7 +300,7 @@ h.test("reader auto-open requires a table but explicit Reader still opens", func
     plugin.close_reader()
     plugin.state.paused_buffers[source_buf] = nil
 
-    plugin.setup({ debounce_ms = 0, reader = { auto_open = "always" } })
+    plugin.setup({ debounce_ms = 0, preview_mode = "reader", reader = { auto_open = "always" } })
     plugin.refresh_auto()
     h.assert_true("always policy preserves automatic no-table Reader", reader.is_reader(0))
     plugin.disable_auto_preview()

@@ -13,6 +13,8 @@ All notable changes to `markdown-table-wrap.nvim` are documented here.
 
 ### Changed
 
+- `preview_mode` now defaults to `"inline"` again. The default render happens in place, inside the buffer being edited: it stays `modifiable`, the raw source row under the cursor is revealed so it can be edited while the rest of the table stays rendered, and no separate buffer is entered. Reader mode is unchanged and still available with `preview_mode = "reader"`, `:MarkdownTableReader`, or `:MarkdownTableToggleReader`; `reader.auto_open` keeps applying once Reader is the selected mode.
+- `max_width_ratio` is now applied to the window's text area instead of its full width. The `'number'`, `'signcolumn'`, and `'foldcolumn'` widths are subtracted before the ratio, so a rendered table can no longer overflow into or past the gutter. With no gutter the result is unchanged. With one, tables are narrower than before: measured on an 80-column window with `'number'` on (a 4-column gutter), a four-column table that used to render 72 columns wide -- 76 including the gutter -- now renders 68 wide and wraps one row into an extra line; at 120 columns the same table goes from 108 to 104 columns wide with no change in line count.
 - `inline_disable_wrap` now defaults to `false`. Rendered source rows are removed from the screen with `conceal_lines` on Neovim 0.11 or newer, so they cannot soft-wrap underneath the rendered table, and `'wrap'` has to stay on for the raw source row revealed under the cursor. Setting it to `true` still opts into the previous hard-replace behaviour, which also sets `'concealcursor'` so no row is revealed. `inline_wrap_scope` is only consulted when it is `true`.
 
 ### Fixed

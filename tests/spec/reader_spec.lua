@@ -1,9 +1,12 @@
 local h = require("tests.helpers")
 
-h.test("reader is the default preview mode", function()
+h.test("reader is opt-in and inline is the default preview mode", function()
   local plugin = require("markdown-table-wrap")
   plugin.setup({ auto_preview = false })
-  h.assert_eq("default preview mode", plugin.config.preview_mode, "reader")
+  h.assert_eq("default preview mode", plugin.config.preview_mode, "inline")
+
+  plugin.setup({ auto_preview = false, preview_mode = "reader" })
+  h.assert_eq("reader mode stays selectable", plugin.config.preview_mode, "reader")
 end)
 
 h.test("reader replaces source tables without modifying Markdown", function()

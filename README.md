@@ -47,7 +47,7 @@ Floating preview for long table reading:
 - Keeps pipes from splitting table cells when they occur inside matching code spans with arbitrary backtick-run lengths.
 - Prefers wrapping at spaces, `、`, `，`, `,`, `；`, `;`, and `/`.
 - Renders a Unicode table inline in a replace-like mode.
-- Opens a stable rendered reader by default when a supported buffer contains a table; cursor focus is not required.
+- Renders every table of a supported buffer inline by default, in place and without cursor focus; `preview_mode = "reader"` opens a stable rendered reader buffer instead.
 - Debounces cursor movement and text changes.
 - Reveals the Markdown source while typing in Insert mode, then restores the rendered table on `InsertLeave`.
 - Skips redraws when the active table content, width, and render options have not changed.
@@ -105,7 +105,7 @@ return {
       use_unicode_border = true,
       table_border = "rounded",
       row_separator = true,
-      preview_mode = "reader",
+      preview_mode = "inline",
       inline_mode = "replace",
       inline_position = "above",
       dim_source = true,
@@ -179,11 +179,17 @@ See [PUBLISHING.md](PUBLISHING.md) for the release flow.
 
 ## Default Behavior
 
-Reader mode is the default preview strategy. With `auto_preview = true` and
-`reader.auto_open = "has_table"` (the default), a supported buffer switches to
-the protected Reader only after at least one table is detected. Plain Markdown
-documents remain in Source. Set `reader.auto_open = "always"` to retain the
-earlier behavior of opening Reader for every supported buffer.
+Inline mode is the default preview strategy. With `auto_preview = true`, every
+table of a supported buffer is rendered in place inside the buffer you are
+editing: the buffer stays modifiable, and the source row under the cursor is
+revealed as raw Markdown so it can be edited while the rest of the table stays
+rendered.
+
+Set `preview_mode = "reader"` to start in the protected Reader instead. With
+`reader.auto_open = "has_table"` (the default), a supported buffer then
+switches to Reader only after at least one table is detected, and plain
+Markdown documents remain in Source. Set `reader.auto_open = "always"` to open
+Reader for every supported buffer.
 
 Reader contains the complete document and fully rendered tables. No table needs
 cursor focus, and the source buffer remains untouched in the background.
@@ -232,16 +238,17 @@ keys = {
 }
 ```
 
-`preview_mode = "reader"` selects the default strategy. `MarkdownTableToggleReader`
-changes the current window between Reader and Source, while
-`MarkdownTableToggleInline` selects Inline for the current editing session.
+`preview_mode = "inline"` is the default strategy; set `preview_mode = "reader"`
+to start in Reader instead. `MarkdownTableToggleReader` changes the current
+window between Reader and Source, while `MarkdownTableToggleInline` selects
+Inline for the current editing session.
 
 ### Why Reader Avoids Wrap Leaks
 
 Inline replacement is tied to real source rows. When a raw Markdown table row is wider than the window and `wrap` is enabled, Neovim may create continuation screen rows underneath the extmark overlay. Conceal and virtual text cannot reliably replace those continuation rows on every terminal, which is why source fragments such as an extra `|` can appear.
 
-Reader mode is already the default strategy. The equivalent explicit
-configuration is:
+Reader mode is opt-in; the default strategy is Inline. Requesting Reader looks
+like this:
 
 ```lua
 require("markdown-table-wrap").setup({
@@ -284,7 +291,7 @@ opens automatically when a supported buffer contains a table and renders every
 supported table. The commands below provide manual control and access to the optional
 inline and floating modes.
 
-- `:MarkdownTablePreview` opens the configured preview mode. By default this is Reader.
+- `:MarkdownTablePreview` opens the configured preview mode. By default this is Inline.
 - `:MarkdownTableInlinePreview` renders an inline preview for the table under the cursor.
 - `:MarkdownTableFloatPreview` opens a floating preview for the table under the cursor.
 - `:MarkdownTableReader` opens the full document in the rendered reader.
@@ -330,7 +337,7 @@ require("markdown-table-wrap").setup({
   use_unicode_border = true,
   table_border = "rounded",
   row_separator = true,
-  preview_mode = "reader",
+  preview_mode = "inline",
   inline_mode = "replace",
   inline_position = "above",
   dim_source = true,
@@ -381,7 +388,7 @@ require("markdown-table-wrap").setup({
 
 Options:
 
-- `max_width_ratio`: maximum preview table width as a ratio of the current window width, clamped to `0.1` through `1.0`.
+- `max_width_ratio`: maximum preview table width as a ratio of the current window's **text area**, clamped to `0.1` through `1.0`. The number, sign, and fold columns are subtracted before the ratio applies, so a window with a visible gutter renders narrower tables than a bare one of the same total width.
 - `min_col_width`: minimum content width for each column.
 - `max_col_width`: maximum natural content width before wrapping.
 - `fit_to_window`: prioritize fitting the complete table inside the current text area, even when this requires columns narrower than `min_col_width`.
@@ -389,7 +396,7 @@ Options:
 - `use_unicode_border`: use Unicode table drawing characters. Set to `false` for ASCII.
 - `table_border`: `"rounded"` or `"single"` for rendered table corners.
 - `row_separator`: draw horizontal separators between body rows for clearer cell grouping.
-- `preview_mode`: `"reader"` (default), `"inline"`, or `"float"` for `:MarkdownTablePreview`.
+- `preview_mode`: `"inline"` (default), `"reader"`, or `"float"` for `:MarkdownTablePreview`. Inline renders in place inside your own buffer, which stays modifiable and reveals the raw source row under the cursor; Reader opens a separate, non-modifiable rendered buffer.
 - `reader`: behavior for the protected full-document reader. `reader.auto_open = "has_table"` opens it automatically only when a table is detected; use `"always"` to open it for every supported buffer. Reader windows enable `wrap` and `breakindent` while keeping `linebreak` disabled by default.
 - `inline_mode`: `"replace"` or `"insert"`. Replace mode hides source text and overlays the rendered table in place.
 - `inline_position`: `"above"` or `"below"` for insert mode.
@@ -571,7 +578,7 @@ With the default configuration, opening a Markdown file renders this table autom
 
 The current rendering model includes:
 
-- Full-document Reader preview by default.
+- Inline, in-place table rendering by default, with a full-document Reader preview on request.
 - Automatic rendering of every supported table without cursor focus.
 - Command-free workflow: edit Source in Insert mode and view rendered content in Normal mode.
 - Visual selection of real Reader lines, with Reader retained after yank.
@@ -647,7 +654,7 @@ nvim --headless -u NONE --cmd "set shadafile=NONE" --cmd "set noswapfile" \
 :help markdown-table-wrap
 ```
 
-The default Reader uses real lines in a separate protected scratch buffer. Optional inline mode hides source table text with extmark conceal and overlays rendered rows on the original table rows. Neither mode edits the Markdown source.
+The default inline mode hides source table text with extmark conceal and draws the rendered rows as virtual lines anchored to the original table rows. The optional Reader uses real lines in a separate protected scratch buffer. Neither mode edits the Markdown source.
 
 With `inline_viewport_scrolling = false`, the complete rendered table is shown inline by default, even when wrapped cells make it taller than the source table. This is easier to understand when first trying the plugin because there is no hidden rendered content.
 

@@ -135,7 +135,7 @@ COMMANDS                                      *markdown-table-wrap-commands*
 
                                                         *:MarkdownTablePreview*
 :MarkdownTablePreview
-    Open the configured preview mode. Defaults to Reader.
+    Open the configured preview mode. Defaults to Inline.
 
                                                   *:MarkdownTableInlinePreview*
 :MarkdownTableInlinePreview
@@ -247,7 +247,7 @@ Default setup:
     use_unicode_border = true,
     table_border = "rounded",
     row_separator = true,
-    preview_mode = "reader",
+    preview_mode = "inline",
     inline_mode = "replace",
     inline_position = "above",
     dim_source = true,
@@ -301,8 +301,11 @@ Default setup:
 Important options:
 
 max_width_ratio~
-    Maximum rendered table width as a ratio of the current window width,
-    clamped to 0.1 through 1.0.
+    Maximum rendered table width as a ratio of the current window's text
+    area, clamped to 0.1 through 1.0. The 'number', 'signcolumn', and
+    'foldcolumn' widths are subtracted before the ratio applies, so a window
+    with a visible gutter renders narrower tables than a bare window of the
+    same total width.
 
 min_col_width~
     Minimum display width for a column.
@@ -315,7 +318,10 @@ fit_to_window~
     When necessary, columns may become narrower than min_col_width.
 
 preview_mode~
-    "reader" (default), "inline", or "float".
+    "inline" (default), "reader", or "float". Inline renders in place inside
+    the buffer you are editing, which stays modifiable and reveals the raw
+    source row under the cursor. Reader opens a separate, non-modifiable
+    rendered buffer and has to be requested explicitly.
 
 reader~
     Behavior for the full-document reader. reader.auto_open accepts

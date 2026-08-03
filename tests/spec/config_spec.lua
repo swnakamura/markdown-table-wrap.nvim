@@ -29,7 +29,7 @@ h.test("setup normalizes invalid configuration without breaking rendering", func
   h.assert_eq("maximum width follows minimum", plugin.config.max_col_width, 1)
   h.assert_eq("negative debounce is clamped", plugin.config.debounce_ms, 0)
   h.assert_eq("overlay priority is positive", plugin.config.overlay_priority, 1)
-  h.assert_eq("invalid preview mode falls back", plugin.config.preview_mode, "reader")
+  h.assert_eq("invalid preview mode falls back", plugin.config.preview_mode, "inline")
   h.assert_eq("invalid inline mode falls back", plugin.config.inline_mode, "replace")
   h.assert_eq("invalid inline position falls back", plugin.config.inline_position, "above")
   h.assert_eq("invalid table border falls back", plugin.config.table_border, "rounded")
