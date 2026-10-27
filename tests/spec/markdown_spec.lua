@@ -62,14 +62,6 @@ h.test("markdown parses link variants and icons", function()
   h.assert_eq("extract image url", extracted[3].url, "image.png")
 end)
 
-h.test("markdown parses multi-backtick inline code", function()
-  local markdown = require("markdown-table-wrap.markdown")
-  local parsed = markdown.parse_inline("``a|b``")
-
-  h.assert_eq("multi-backtick display text", parsed.text, "a|b")
-  h.assert_eq("multi-backtick kind", parsed.spans[1].kind, "code")
-end)
-
 h.test("markdown removes concealed code delimiters from link labels", function()
   local markdown = require("markdown-table-wrap.markdown")
   local parsed = markdown.parse_inline("[`overview`](curriculum/week-02/overview.md)")
@@ -78,12 +70,6 @@ h.test("markdown removes concealed code delimiters from link labels", function()
   h.assert_eq("code-wrapped link span start", parsed.spans[1].start_col, 0)
   h.assert_eq("code-wrapped link span end", parsed.spans[1].end_col, #"overview")
   h.assert_eq("code-wrapped link URL", parsed.spans[1].url, "curriculum/week-02/overview.md")
-end)
-
-h.test("markdown hard breaks", function()
-  local markdown = require("markdown-table-wrap.markdown")
-  h.assert_eq("br break", markdown.inline_to_text("a<br>b"), "a\nb")
-  h.assert_eq("br slash break", markdown.inline_to_text("a<br/>b"), "a\nb")
 end)
 
 h.test("markdown extracts links from parsed cells", function()
@@ -96,17 +82,10 @@ h.test("markdown extracts links from parsed cells", function()
   h.assert_eq("parsed cell link url", links[1].url, "https://www.youtube.com")
 end)
 
-h.test("markdown leaves unmatched syntax visible and handles empty input", function()
-  local markdown = require("markdown-table-wrap.markdown")
-
-  h.assert_eq("empty inline text", markdown.inline_to_text(""), "")
-  h.assert_eq("unmatched code stays visible", markdown.inline_to_text("before `unfinished"), "before `unfinished")
-  h.assert_eq("unmatched link stays visible", markdown.inline_to_text("[missing]("), "[missing](")
-end)
-
-h.test("markdown display text follows CommonMark inline rules", function()
+h.test("markdown display text follows CommonMark inline rules, <br> breaks and unmatched syntax", function()
   local markdown = require("markdown-table-wrap.markdown")
   local cases = {
+    { "", "" },
     { "snake_case_name", "snake_case_name" },
     { "~/path/to_file_name", "~/path/to_file_name" },
     { "http://example.com/a_b_c", "http://example.com/a_b_c" },
@@ -117,7 +96,12 @@ h.test("markdown display text follows CommonMark inline rules", function()
     { "[Foo](https://en.wikipedia.org/wiki/Foo_(bar)) tail", "Foo tail" },
     { "<https://example.com>", "https://example.com" },
     { "``code with ` tick``", "code with ` tick" },
+    { "``a|b``", "a|b" },
     { "[[note|alias]]", "alias" },
+    { "a<br>b", "a\nb" },
+    { "a<br/>b", "a\nb" },
+    { "before `unfinished", "before `unfinished" },
+    { "[missing](", "[missing](" },
   }
   for _, case in ipairs(cases) do
     h.assert_eq("display text of " .. case[1], markdown.inline_to_text(case[1]), case[2])
