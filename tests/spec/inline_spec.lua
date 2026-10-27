@@ -310,6 +310,406 @@ h.test("a table on line 1 keeps its top border on screen while its first row is 
   end)
 end)
 
+-- Renders `lines` with the cursor on cursors[1], then moves the cursor through
+-- `cursors` and compares the top screen lines with screen_for(cursor line).
+-- `numbers` turns on 'number' and 'relativenumber' and reads the number column
+-- as part of each screen line.
+local function walk_screens(name, lines, cursors, screen_for, numbers)
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    preview_mode = "inline",
+    debounce_ms = 0,
+    render_all = true,
+    auto_preview = true,
+  })
+
+  h.with_buffer(lines, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    local saved = { number = vim.wo.number, relativenumber = vim.wo.relativenumber, wrap = vim.wo.wrap }
+    local ok, err = pcall(function()
+      vim.wo.number = numbers
+      vim.wo.relativenumber = numbers
+      vim.wo.wrap = true
+      vim.api.nvim_win_set_cursor(0, { cursors[1], 0 })
+      plugin.refresh_auto({ force = true })
+
+      for _, lnum in ipairs(cursors) do
+        vim.api.nvim_win_set_cursor(0, { lnum, 0 })
+        vim.api.nvim_exec_autocmds("CursorMoved", { buffer = buf })
+        vim.cmd("redraw")
+
+        local expected = screen_for(lnum)
+        local screen = {}
+        for row = 1, #expected do
+          screen[row] = h.screen_line(row, numbers)
+        end
+        h.assert_deep_eq(string.format("%s, cursor on line %d", name, lnum), screen, expected)
+      end
+    end)
+
+    for option, value in pairs(saved) do
+      vim.wo[option] = value
+    end
+    inline.clear(buf)
+    if not ok then
+      error(err, 0)
+    end
+  end)
+end
+
+-- Runs fn(win) in a new split of `height` rows showing the current buffer and
+-- closes the split afterwards, also when fn fails; window options set on win
+-- go away with it.
+local function in_split(height, fn)
+  vim.cmd("split")
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_height(win, height)
+  local ok, err = pcall(fn, win)
+  vim.api.nvim_win_close(win, true)
+  if not ok then
+    error(err, 0)
+  end
+end
+
+-- screen_for for walk_screens: `rendered` is the screen while the cursor is
+-- outside the tables; with the cursor on line lnum, the line at screen row
+-- reveal[lnum][1] gives way to the lines reveal[lnum][2].
+local function revealed_screens(rendered, reveal)
+  return function(lnum)
+    local screen = vim.deepcopy(rendered)
+    if reveal[lnum] then
+      local row, replacement = unpack(reveal[lnum])
+      table.remove(screen, row)
+      for offset, line in ipairs(replacement) do
+        table.insert(screen, row + offset - 1, line)
+      end
+    end
+    return screen
+  end
+end
+
+-- Tables touch only across a change of quote depth: within one depth, the
+-- line under a table is one of its rows.
+h.test("two adjacent tables at the top of the buffer are both drawn in source order wherever the cursor is", function()
+  local lines = {
+    "> | A | B |",
+    "> | --- | --- |",
+    "> | one | two |",
+    "| E | F |",
+    "| --- | --- |",
+    "| five | six |",
+    "",
+    "outro",
+  }
+  local rendered = {
+    "> ╭──────────┬──────────╮",
+    "> │ A        │ B        │",
+    "> ├──────────┼──────────┤",
+    "> │ one      │ two      │",
+    "> ╰──────────┴──────────╯",
+    "╭──────────┬──────────╮",
+    "│ E        │ F        │",
+    "├──────────┼──────────┤",
+    "│ five     │ six      │",
+    "╰──────────┴──────────╯",
+    "",
+    "outro",
+    "~",
+  }
+  local reveal = {
+    { 2, { "> | A | B |" } },
+    { 3, { "> | --- | --- |" } },
+    { 4, { "> | one | two |" } },
+    { 7, { "| E | F |" } },
+    { 8, { "| --- | --- |" } },
+    { 9, { "| five | six |" } },
+  }
+
+  -- 1 -> 4 -> 1 keeps the row's index within its table and changes only the
+  -- table.
+  local cursors = { 8, 1, 4, 1 }
+  for lnum = 2, 8 do
+    table.insert(cursors, lnum)
+  end
+  for lnum = 7, 1, -1 do
+    table.insert(cursors, lnum)
+  end
+
+  walk_screens("two-table run", lines, cursors, revealed_screens(rendered, reveal), false)
+end)
+
+h.test("three adjacent tables ending the buffer are all drawn in source order wherever the cursor is", function()
+  local width = vim.api.nvim_win_get_width(0)
+  local lines = {
+    "intro",
+    "",
+    "| E | F |",
+    "| --- | --- |",
+    "| five | six |",
+    "> | A | B |",
+    "> | --- | --- |",
+    -- Revealed, this row soft-wraps onto a second screen row (its last 14
+    -- cells) while it renders as one, so the middle table gets a stable-height
+    -- filler line under its other revealed rows.
+    "> | one | two" .. string.rep(" ", width) .. "|",
+    "> > | C | D |",
+    "> > | --- | --- |",
+    "> > | three | four |",
+  }
+  local rendered = {
+    "intro",
+    "",
+    "╭──────────┬──────────╮",
+    "│ E        │ F        │",
+    "├──────────┼──────────┤",
+    "│ five     │ six      │",
+    "╰──────────┴──────────╯",
+    "> ╭──────────┬──────────╮",
+    "> │ A        │ B        │",
+    "> ├──────────┼──────────┤",
+    "> │ one      │ two      │",
+    "> ╰──────────┴──────────╯",
+    "> > ╭──────────┬──────────╮",
+    "> > │ C        │ D        │",
+    "> > ├──────────┼──────────┤",
+    "> > │ three    │ four     │",
+    "> > ╰──────────┴──────────╯",
+    "~",
+  }
+  local reveal = {
+    [3] = { 4, { "| E | F |" } },
+    [4] = { 5, { "| --- | --- |" } },
+    [5] = { 6, { "| five | six |" } },
+    [6] = { 9, { "> | A | B |", ">" } },
+    [7] = { 10, { "> | --- | --- |", ">" } },
+    [8] = { 11, { "> | one | two", string.rep(" ", 13) .. "|" } },
+    [9] = { 14, { "> > | C | D |" } },
+    [10] = { 15, { "> > | --- | --- |" } },
+    [11] = { 16, { "> > | three | four |" } },
+  }
+
+  local cursors = { 1, 3, 6, 9, 3 }
+  for lnum = 2, 11 do
+    table.insert(cursors, lnum)
+  end
+  for lnum = 10, 1, -1 do
+    table.insert(cursors, lnum)
+  end
+
+  walk_screens("three-table run", lines, cursors, revealed_screens(rendered, reveal), false)
+end)
+
+h.test("adjacent tables number their rows by distance from the cursor row inside and outside them", function()
+  local lines = {
+    "> | A | B |",
+    "> | --- | --- |",
+    "> | one | two |",
+    "| E | F |",
+    "| --- | --- |",
+    "| five | six |",
+    "",
+    "outro",
+  }
+  -- Native numbers on real lines, the plugin's on rendered ones; the cursor
+  -- line shows its absolute number, left-aligned.
+  local screens = {
+    [8] = {
+      "    > ╭──────────┬──────────╮",
+      "  7 > │ A        │ B        │",
+      "  6 > ├──────────┼──────────┤",
+      "  5 > │ one      │ two      │",
+      "    > ╰──────────┴──────────╯",
+      "    ╭──────────┬──────────╮",
+      "  4 │ E        │ F        │",
+      "  3 ├──────────┼──────────┤",
+      "  2 │ five     │ six      │",
+      "    ╰──────────┴──────────╯",
+      "  1",
+      "8   outro",
+    },
+    [7] = {
+      "    > ╭──────────┬──────────╮",
+      "  6 > │ A        │ B        │",
+      "  5 > ├──────────┼──────────┤",
+      "  4 > │ one      │ two      │",
+      "    > ╰──────────┴──────────╯",
+      "    ╭──────────┬──────────╮",
+      "  3 │ E        │ F        │",
+      "  2 ├──────────┼──────────┤",
+      "  1 │ five     │ six      │",
+      "    ╰──────────┴──────────╯",
+      "7",
+      "  1 outro",
+    },
+    [2] = {
+      "    > ╭──────────┬──────────╮",
+      "  1 > │ A        │ B        │",
+      "2   > | --- | --- |",
+      "  1 > │ one      │ two      │",
+      "    > ╰──────────┴──────────╯",
+      "    ╭──────────┬──────────╮",
+      "  2 │ E        │ F        │",
+      "  3 ├──────────┼──────────┤",
+      "  4 │ five     │ six      │",
+      "    ╰──────────┴──────────╯",
+      "  5",
+      "  6 outro",
+    },
+    [5] = {
+      "    > ╭──────────┬──────────╮",
+      "  4 > │ A        │ B        │",
+      "  3 > ├──────────┼──────────┤",
+      "  2 > │ one      │ two      │",
+      "    > ╰──────────┴──────────╯",
+      "    ╭──────────┬──────────╮",
+      "  1 │ E        │ F        │",
+      "5   | --- | --- |",
+      "  1 │ five     │ six      │",
+      "    ╰──────────┴──────────╯",
+      "  2",
+      "  3 outro",
+    },
+  }
+
+  walk_screens("numbered run", lines, { 8, 7, 2, 5 }, function(lnum)
+    return screens[lnum]
+  end, true)
+end)
+
+h.test("stepping down out of a table or a run that is taller than the window keeps the cursor in it", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    preview_mode = "inline",
+    debounce_ms = 0,
+    render_all = true,
+    auto_preview = true,
+  })
+
+  local lines = { "p1", "p2", "p3", "p4", "p5", "p6", "" }
+  -- Lines 8-14: a lone table rendering to 13 lines.
+  vim.list_extend(lines, {
+    "| A | B |",
+    "| --- | --- |",
+    "| a1 | a2 |",
+    "| a3 | a4 |",
+    "| a5 | a6 |",
+    "| a7 | a8 |",
+    "| a9 | a10 |",
+  })
+  vim.list_extend(lines, { "", "m1", "m2", "m3", "" })
+  -- Lines 20-29: a run whose first table renders to 13 lines.
+  vim.list_extend(lines, {
+    "| L | M |",
+    "| --- | --- |",
+    "| l1 | m1 |",
+    "| l2 | m2 |",
+    "| l3 | m3 |",
+    "| l4 | m4 |",
+    "| l5 | m5 |",
+    "> | X | Y |",
+    "> | --- | --- |",
+    "> | x1 | y1 |",
+  })
+  vim.list_extend(lines, { "", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8" })
+
+  h.with_buffer(lines, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    in_split(11, function(win)
+      vim.wo[win].scrolloff = 3
+      vim.api.nvim_win_set_cursor(win, { 1, 0 })
+      plugin.refresh_auto({ force = true })
+
+      for lnum = 2, #lines do
+        vim.cmd("normal! j")
+        vim.api.nvim_exec_autocmds("CursorMoved", { buffer = buf })
+        h.drain_scheduled()
+        vim.cmd("redraw")
+        local winline = vim.fn.winline()
+        h.assert_true(
+          string.format("cursor on line %d is on window row %d of 11", lnum, winline),
+          winline >= 1 and winline <= 11
+        )
+      end
+    end)
+    inline.clear(buf)
+  end)
+end)
+
+h.test("relative numbers catch up when only the tail of a run scrolls into view", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    preview_mode = "inline",
+    debounce_ms = 0,
+    render_all = true,
+    auto_preview = true,
+  })
+
+  local lines = { "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10" }
+  -- Lines 11-17: a run; e3 is line 17.
+  vim.list_extend(lines, {
+    "> | A | B |",
+    "> | --- | --- |",
+    "> | a1 | a2 |",
+    "| E | F |",
+    "| --- | --- |",
+    "| e1 | e2 |",
+    "| e3 | e4 |",
+    "",
+  })
+  for lnum = 19, 40 do
+    table.insert(lines, "q" .. lnum)
+  end
+
+  h.with_buffer(lines, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    in_split(11, function(win)
+      vim.wo[win].number = true
+      vim.wo[win].relativenumber = true
+      vim.wo[win].scrolloff = 0
+      vim.api.nvim_win_set_cursor(win, { 1, 0 })
+      plugin.refresh_auto({ force = true })
+
+      -- Off screen the run keeps the distances from line 1.
+      vim.fn.winrestview({ topline = 20, lnum = 25, col = 0 })
+      inline.update_reveal(buf)
+
+      -- Only the run's last three rendered lines show, as filler above line 18.
+      vim.fn.winrestview({ topline = 18, topfill = 3 })
+      inline.update_reveal(buf)
+      vim.cmd("redraw")
+      h.assert_deep_eq("e3 (line 17) is 8 lines from the cursor on 25", {
+        h.screen_line(1, true),
+        h.screen_line(2, true),
+        h.screen_line(3, true),
+        h.screen_line(4, true),
+      }, {
+        "    ├──────────┼──────────┤",
+        "  8 │ e3       │ e4       │",
+        "    ╰──────────┴──────────╯",
+        "  7",
+      })
+
+      vim.cmd("normal! j")
+      vim.api.nvim_exec_autocmds("CursorMoved", { buffer = buf })
+      vim.cmd("redraw")
+      h.assert_deep_eq("after j, e3 is 9 lines from the cursor on 26", {
+        h.screen_line(1, true),
+        h.screen_line(2, true),
+      }, {
+        "  9 │ e3       │ e4       │",
+        "    ╰──────────┴──────────╯",
+      })
+    end)
+    inline.clear(buf)
+  end)
+end)
+
 h.test("row-anchored lines keep their original rendered line index", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")

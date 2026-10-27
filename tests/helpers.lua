@@ -52,13 +52,25 @@ function M.drain_timers(ms)
   end, 1)
 end
 
+-- Runs every callback queued with vim.schedule so far: the queue runs in
+-- order, so a sentinel queued last runs last.
+function M.drain_scheduled()
+  local ran = false
+  vim.schedule(function()
+    ran = true
+  end)
+  vim.wait(1000, function()
+    return ran
+  end, 1)
+end
+
 -- The text drawn on screen line `row` of the current window's text area
--- (number, sign and fold columns left out), trailing blanks trimmed. Reads
--- the grid as last drawn, so call :redraw first.
-function M.screen_line(row)
+-- (number, sign and fold columns left out unless `gutter` is true), trailing
+-- blanks trimmed. Reads the grid as last drawn, so call :redraw first.
+function M.screen_line(row, gutter)
   local info = vim.fn.getwininfo(vim.api.nvim_get_current_win())[1]
   local cells = {}
-  for col = info.wincol + info.textoff, info.wincol + info.width - 1 do
+  for col = info.wincol + (gutter and 0 or info.textoff), info.wincol + info.width - 1 do
     table.insert(cells, vim.fn.screenstring(info.winrow + row - 1, col))
   end
   return (table.concat(cells):gsub("%s+$", ""))

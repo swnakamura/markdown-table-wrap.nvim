@@ -223,8 +223,14 @@ end
 -- virt_lines attached to a conceal_lines-hidden line are not displayed, so
 -- the blocks always anchor to a visible line.
 --
+-- Tables with no line between them (possible across a change of quote depth)
+-- are laid out together as one run, as if they were one table. Anchored one
+-- by one, a table's outside anchor would be a hidden row of its neighbour,
+-- and two tables' blocks hanging on one row would be stacked in mark-tree
+-- order, which follows neither creation order nor priority.
+--
 -- The per-buffer state lives in `aligned_tables`, declared at the top of this
--- file.
+-- file: the runs of the buffer in source order.
 
 -- A window currently showing bufnr (preferring the current window), or nil.
 local function find_window(bufnr)
@@ -302,21 +308,9 @@ local function stable_filler(winid, entry, split)
   return math.max(0, extra - (height - entry.group_lines[split]))
 end
 
--- (Re-)attach the rendered virtual-line blocks of one table. split is the
--- 1-based group index of the cursor row, or nil when the cursor is outside.
-local function set_table_blocks(bufnr, entry, split)
-  for _, key in ipairs({ "above_id", "below_id" }) do
-    if entry[key] then
-      vim.api.nvim_buf_del_extmark(bufnr, namespace, entry[key])
-      entry[key] = nil
-    end
-  end
-
-  local winid = find_window(bufnr)
-  local column = number_column(winid, entry)
-  entry.numbers_relative = column ~= nil and column.relative or false
-  entry.number_cursor_row = column and column.cursor_row or nil
-
+-- The rendered lines of one table, carrying the number column described by
+-- column (see number_column) unless it is nil.
+local function numbered_lines(entry, column)
   -- The first rendered line of each source row carries that row's line
   -- number, right-aligned like the native column; continuation and border
   -- lines get a blank column. With 'relativenumber' the distance to the
@@ -346,9 +340,44 @@ local function set_table_blocks(bufnr, entry, split)
     end
   end
 
-  local source = entry.numbered or entry.flat
+  return entry.numbered or entry.flat
+end
 
-  local function attach(row, first, last, above, filler)
+-- (Re-)attach the rendered virtual-line blocks of one run of tables. entry is
+-- the table holding the cursor row and split the row's 1-based group index in
+-- it, or both are nil when the cursor is outside the run.
+local function set_run_blocks(bufnr, run, entry, split)
+  for _, key in ipairs({ "above_id", "below_id" }) do
+    if run[key] then
+      vim.api.nvim_buf_del_extmark(bufnr, namespace, run[key])
+      run[key] = nil
+    end
+  end
+
+  local first, last = run.tables[1], run.tables[#run.tables]
+  local winid = find_window(bufnr)
+  local column = number_column(winid, first)
+  run.numbers_relative = column ~= nil and column.relative or false
+  run.number_cursor_row = column and column.cursor_row or nil
+
+  -- A run spanning the entire buffer has no visible line outside itself to
+  -- anchor to; the cursor is then necessarily inside it, so fall back to
+  -- splitting at the first row.
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local has_outside_anchor = last.end_row + 1 < line_count or first.start_row > 0
+  if not entry and not has_outside_anchor then
+    entry, split = first, 1
+  end
+
+  local source, offset = {}, 0
+  for _, member in ipairs(run.tables) do
+    if member == entry then
+      offset = #source
+    end
+    vim.list_extend(source, numbered_lines(member, column))
+  end
+
+  local function attach(row, from, to, above, filler)
     local lines = {}
     -- The filler leads the block: it sits directly under the revealed raw
     -- line, so the rendered lines that follow stay on fixed screen rows. It
@@ -364,7 +393,7 @@ local function set_table_blocks(bufnr, entry, split)
       table.insert(lines, blank)
     end
 
-    for index = math.max(first, 1), math.min(last, #source) do
+    for index = math.max(from, 1), math.min(to, #source) do
       table.insert(lines, source[index])
     end
 
@@ -376,31 +405,22 @@ local function set_table_blocks(bufnr, entry, split)
       virt_lines_above = above,
       virt_lines_leftcol = column ~= nil,
       right_gravity = false,
-      priority = entry.priority,
+      priority = first.priority,
     })
   end
 
-  -- A table spanning the entire buffer has no visible line outside itself to
-  -- anchor to; the cursor is then necessarily inside it, so fall back to
-  -- splitting at the first row.
-  local line_count = vim.api.nvim_buf_line_count(bufnr)
-  local has_outside_anchor = entry.end_row + 1 < line_count or entry.start_row > 0
-  if not split and not has_outside_anchor then
-    split = 1
-  end
-
-  if split then
+  if entry then
     local info = entry.group_index[split]
     local row = entry.start_row + split - 1
-    entry.above_id = attach(row, 1, info.content_start - 1, true)
-    entry.below_id = attach(row, info.content_last + 1, #entry.flat, false, stable_filler(winid, entry, split))
-  elseif entry.end_row + 1 < line_count then
-    entry.above_id = attach(entry.end_row + 1, 1, #entry.flat, true)
+    run.above_id = attach(row, 1, offset + info.content_start - 1, true)
+    run.below_id = attach(row, offset + info.content_last + 1, #source, false, stable_filler(winid, entry, split))
+  elseif last.end_row + 1 < line_count then
+    run.above_id = attach(last.end_row + 1, 1, #source, true)
   else
-    entry.below_id = attach(entry.start_row - 1, 1, #entry.flat, false)
+    run.below_id = attach(first.start_row - 1, 1, #source, false)
   end
 
-  entry.split = split or false
+  run.entry, run.split = entry, split
 end
 
 -- Re-split the virtual-line blocks around the cursor row. Neovim itself
@@ -408,8 +428,8 @@ end
 -- the cursor line), so no per-row extmark juggling is needed here.
 function M.update_reveal(bufnr)
   bufnr = normalize_bufnr(bufnr)
-  local tables = aligned_tables[bufnr]
-  if not tables or vim.api.nvim_get_current_buf() ~= bufnr then
+  local runs = aligned_tables[bufnr]
+  if not runs or vim.api.nvim_get_current_buf() ~= bufnr then
     return
   end
 
@@ -417,24 +437,27 @@ function M.update_reveal(bufnr)
   local top = vim.fn.line("w0") - 1
   local bot = vim.fn.line("w$") - 1
 
-  for _, entry in pairs(tables) do
-    local split = nil
-    if row >= entry.start_row and row <= entry.end_row then
-      split = row - entry.start_row + 1
+  for _, run in ipairs(runs) do
+    local entry, split = nil, nil
+    for _, member in ipairs(run.tables) do
+      if row >= member.start_row and row <= member.end_row then
+        entry, split = member, row - member.start_row + 1
+      end
     end
+    local first, last = run.tables[1], run.tables[#run.tables]
 
     -- Relative line numbers are measured from the cursor row, so the blocks
     -- also go stale whenever the cursor changes lines. Refreshing them only
-    -- matters while some part of the table can be on screen: an off-screen
-    -- table stays stale (number_cursor_row keeps the old row) and catches
+    -- matters while some part of the run can be on screen: an off-screen
+    -- run stays stale (number_cursor_row keeps the old row) and catches
     -- up here as soon as it scrolls back into view.
-    local numbers_stale = entry.numbers_relative and entry.number_cursor_row ~= row
-    local visible = entry.end_row + 1 >= top - 1 and entry.start_row - 1 <= bot + 1
+    local numbers_stale = run.numbers_relative and run.number_cursor_row ~= row
+    local visible = last.end_row + 1 >= top - 1 and first.start_row - 1 <= bot + 1
 
-    local split_changed = entry.split ~= (split or false)
+    local split_changed = run.entry ~= entry or run.split ~= split
 
     if split_changed or (numbers_stale and visible) then
-      set_table_blocks(bufnr, entry, split)
+      set_run_blocks(bufnr, run, entry, split)
     end
 
     if split == 1 and entry.start_row == 0 then
@@ -543,17 +566,40 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
     group_lines = group_lines,
   }
 
-  for row = start_row, end_row do
-    vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
-      conceal_lines = "",
-      right_gravity = false,
-    })
+  return entry
+end
+
+-- Groups the tables of bufnr shown in replace mode (entries, in source order)
+-- into runs, hides their source rows and hangs each run's blocks. Not done
+-- per table as it is shown: a run would then be laid out again for every
+-- table that joins it.
+local function lay_out_runs(bufnr, entries)
+  if #entries == 0 then
+    return
   end
 
-  aligned_tables[bufnr] = aligned_tables[bufnr] or {}
-  aligned_tables[bufnr][tostring(start_row)] = entry
+  local runs = {}
+  for _, entry in ipairs(entries) do
+    local run = runs[#runs]
+    if not run or run.tables[#run.tables].end_row + 1 ~= entry.start_row then
+      run = { tables = {} }
+      table.insert(runs, run)
+    end
+    table.insert(run.tables, entry)
+  end
+  aligned_tables[bufnr] = runs
 
-  set_table_blocks(bufnr, entry, nil)
+  for _, run in ipairs(runs) do
+    for _, entry in ipairs(run.tables) do
+      for row = entry.start_row, entry.end_row do
+        vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
+          conceal_lines = "",
+          right_gravity = false,
+        })
+      end
+    end
+    set_run_blocks(bufnr, run, nil, nil)
+  end
 end
 
 local function show_replace(bufnr, table_info, config, rendered)
@@ -634,23 +680,25 @@ function M.is_active(bufnr)
   return #marks > 0
 end
 
+-- Returns the rendering and, in replace mode, the table's entry for
+-- lay_out_runs.
 local function show_one(bufnr, table_info, config)
   local rendered = render.render_table(table_info, config)
 
   if config.inline_mode == "insert" then
     show_insert(bufnr, table_info, config, rendered)
-  else
-    show_replace(bufnr, table_info, config, rendered)
+    return rendered, nil
   end
 
-  return rendered
+  return rendered, show_replace(bufnr, table_info, config, rendered)
 end
 
 function M.show(bufnr, table_info, config)
   ensure_highlights(config)
   M.clear(bufnr)
 
-  local rendered = show_one(bufnr, table_info, config)
+  local rendered, entry = show_one(bufnr, table_info, config)
+  lay_out_runs(bufnr, entry and { entry } or {})
   active_buffers[bufnr] = true
   active_configs[bufnr] = config
   if config.inline_mode == "replace" then
@@ -664,10 +712,15 @@ function M.show_many(bufnr, tables, config)
   ensure_highlights(config)
   M.clear(bufnr)
 
-  local rendered = {}
+  local rendered, entries = {}, {}
   for _, table_info in ipairs(tables) do
-    table.insert(rendered, show_one(bufnr, table_info, config))
+    local table_rendered, entry = show_one(bufnr, table_info, config)
+    table.insert(rendered, table_rendered)
+    if entry then
+      table.insert(entries, entry)
+    end
   end
+  lay_out_runs(bufnr, entries)
 
   active_buffers[bufnr] = #tables > 0
   active_configs[bufnr] = config
