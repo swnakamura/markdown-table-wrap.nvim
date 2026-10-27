@@ -104,7 +104,10 @@ COMMANDS                                      *markdown-table-wrap-commands*
 
                                                    *:MarkdownTableClosePreview*
 :MarkdownTableClosePreview
-    Close the preview and clear inline rendering.
+    Close the preview and clear inline rendering. Automatic rendering then
+    stays off in that buffer until |:MarkdownTablePreview|,
+    |:MarkdownTableToggleInline| or |:MarkdownTableEnableAutoPreview| turns
+    it back on.
 
                                                         *:MarkdownTableRefresh*
 :MarkdownTableRefresh
@@ -188,12 +191,14 @@ Default setup:
     dim_source = true,
     auto_preview = true,
     render_all = true,
-    auto_preview_in_insert = false,
+    auto_preview_in_insert = true,
     clear_on_cursor_leave = true,
-    clear_on_insert = true,
+    clear_on_insert = false,
     clear_on_visual = true,
     debounce_ms = 80,
     overlay_priority = 10000,
+    inline_line_numbers = true,
+    inline_stable_height = true,
     quote_icon = "auto",
     highlight_preset = "default",
     theme_dir = nil,

@@ -27,6 +27,7 @@ All notable changes to `markdown-table-wrap.nvim` are documented here.
 
 ### Fixed
 
+- The configuration examples in the README and the help now show the real defaults, `auto_preview_in_insert = true` and `clear_on_insert = false`, and the help's example lists `inline_line_numbers` and `inline_stable_height`. `:MarkdownTableClosePreview` is documented as also stopping automatic rendering in the buffer until `:MarkdownTablePreview`, `:MarkdownTableToggleInline` or `:MarkdownTableEnableAutoPreview` turns it back on, which it has always done.
 - Table cell navigation now skips the blockquote markers instead of treating them as a leading cell.
 - Cell text follows CommonMark's inline rules, using the inline parser ported from upstream v1.0.0. Intraword underscores no longer start emphasis, so `snake_case_name`, file names, and URLs keep their `_`; backslash escapes such as `\*` and `\_` show the literal character; link destinations may contain balanced parentheses; `<https://...>` and `<user@host>` autolinks render as links; emphasis and links nest; double-backtick code may contain a backtick; and `[[note|alias]]` shows the alias. `:MarkdownTableExport` exports the same corrected text.
 - A link inside emphasis (`**see [doc](url)**`) renders once, with its icon, instead of as raw Markdown. Upstream's parser has the same nesting and printed such a link twice; the link icons are now inserted without assuming that spans never overlap.

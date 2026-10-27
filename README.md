@@ -97,9 +97,9 @@ return {
       dim_source = true,
       auto_preview = true,
       render_all = true,
-      auto_preview_in_insert = false,
+      auto_preview_in_insert = true,
       clear_on_cursor_leave = true,
-      clear_on_insert = true,
+      clear_on_insert = false,
       clear_on_visual = true,
       debounce_ms = 80,
       overlay_priority = 10000,
@@ -201,7 +201,7 @@ manual control and access to the optional floating mode.
 - `:MarkdownTableFloatPreview` opens a floating preview for the table under the cursor.
 - `:MarkdownTableToggleInline` switches between Source and Inline.
 - `:MarkdownTableTogglePreview` toggles the active preview.
-- `:MarkdownTableClosePreview` closes the preview.
+- `:MarkdownTableClosePreview` closes the preview and clears inline rendering. Automatic rendering then stays off in that buffer until `:MarkdownTablePreview`, `:MarkdownTableToggleInline` or `:MarkdownTableEnableAutoPreview` turns it back on.
 - `:MarkdownTableRefresh` force refreshes rendered tables in the current Markdown buffer.
 - `:MarkdownTableEnableAutoPreview` enables automatic preview in the current buffer.
 - `:MarkdownTableDisableAutoPreview` disables automatic preview in the current Source buffer.
@@ -255,9 +255,9 @@ require("markdown-table-wrap").setup({
   dim_source = true,
   auto_preview = true,
   render_all = true,
-  auto_preview_in_insert = false,
+  auto_preview_in_insert = true,
   clear_on_cursor_leave = true,
-  clear_on_insert = true,
+  clear_on_insert = false,
   clear_on_visual = true,
   debounce_ms = 80,
   overlay_priority = 10000,
