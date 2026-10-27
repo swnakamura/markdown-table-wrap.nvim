@@ -19,6 +19,7 @@ h.test("toggle inline switches between source and inline rendering", function()
 
     h.assert_false("inline mode disabled", plugin.toggle_inline())
     h.assert_false("inline rendering is cleared", inline.is_active(buf))
-    h.assert_true("source mode pauses automatic rendering", plugin.state.paused_buffers[buf])
+    plugin.refresh_auto()
+    h.assert_false("an automatic refresh does not bring the rendering back", inline.is_active(buf))
   end)
 end)
