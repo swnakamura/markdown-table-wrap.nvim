@@ -42,6 +42,7 @@ local function marks(bufnr)
         above = details.virt_lines_above == true,
         leftcol = details.virt_lines_leftcol == true,
         texts = texts,
+        lines = details.virt_lines,
       })
     end
   end
@@ -82,6 +83,23 @@ local function capture_during(bufnr, event, keys, capture)
   feed(keys)
   vim.api.nvim_del_augroup_by_id(group)
   return snapshot
+end
+
+-- The numbers drawn into rendered lines, in block order: the digits of each
+-- line's leading LineNr chunk (borders and continuation lines carry a blank
+-- one).
+local function line_numbers(blocks)
+  local numbers = {}
+  for _, block in ipairs(blocks) do
+    for _, line in ipairs(block.lines) do
+      local first = line[1]
+      local digits = first and first[2] == "LineNr" and first[1]:match("^%s*(%d+)%s$")
+      if digits then
+        table.insert(numbers, digits)
+      end
+    end
+  end
+  return table.concat(numbers, ",")
 end
 
 local function move_cursor(bufnr, lnum)
@@ -138,7 +156,12 @@ h.test("default setup renders the table in place with row-anchored blocks", func
     h.assert_true("body row is hidden", concealed[5])
     h.assert_true("last body row is hidden", concealed[6])
     h.assert_false("prose below the table is untouched", concealed[7])
-    h.assert_true("the rendered table is drawn as virtual lines", #blocks > 0)
+    h.assert_eq("one block while the cursor is outside", #blocks, 1)
+    h.assert_eq(
+      "the block holds all 7 rendered lines (two borders, header, delimiter, two rows, one separator)",
+      #blocks[1].texts,
+      7
+    )
 
     local rendered = table.concat(blocks[1].texts, "\n")
     h.assert_true("the rendered table has a top border", rendered:find("╭", 1, true) ~= nil)
@@ -362,35 +385,17 @@ h.test("default setup draws line numbers into the rendered rows", function()
 
     local _, blocks = marks(buf)
     h.assert_eq("one block while the cursor is outside", #blocks, 1)
-    local numbers = {}
-    for _, text in ipairs(blocks[1].texts) do
-      local number = text:match("^%s*(%d+)%s*[│╭├╰]")
-      if number then
-        numbers[tonumber(number)] = true
-      end
-    end
-    h.assert_true("header row carries buffer line 3", numbers[3])
-    h.assert_true("delimiter row carries buffer line 4", numbers[4])
-    h.assert_true("first body row carries buffer line 5", numbers[5])
-    h.assert_true("second body row carries buffer line 6", numbers[6])
+    h.assert_eq("the first line of each source row carries its buffer line", line_numbers(blocks), "3,4,5,6")
     h.assert_true("the block is drawn from the left edge", blocks[1].leftcol)
 
     -- Relative numbers are measured from the cursor row.
     vim.wo.relativenumber = true
     move_cursor(buf, 3)
     local _, relative_blocks = marks(buf)
-    local relative = {}
+    h.assert_eq("rows 4, 5, 6 are 1, 2, 3 lines from the cursor row 3", line_numbers(relative_blocks), "1,2,3")
     for _, block in ipairs(relative_blocks) do
-      for _, text in ipairs(block.texts) do
-        local number = text:match("^%s*(%d+)%s*[│╭├╰]")
-        if number then
-          relative[tonumber(number)] = true
-        end
-      end
+      h.assert_true("every block is drawn from the left edge", block.leftcol)
     end
-    h.assert_true("row 5 is one line from the cursor row 4", relative[1])
-    h.assert_true("row 6 is two lines from the cursor row 4", relative[2])
-    h.assert_false("absolute buffer numbers are gone", relative[5])
 
     vim.wo.number = saved_number
     vim.wo.relativenumber = saved_relative
@@ -537,6 +542,7 @@ h.test("default setup leaves 'wrap' and 'concealcursor' alone", function()
 
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
     plugin.refresh_auto()
+    h.assert_true("the table is rendered", inline.is_active(buf))
     h.assert_true("wrap survives rendering", vim.wo.wrap)
     h.assert_eq("concealcursor survives rendering", vim.wo.concealcursor, "")
 
@@ -578,8 +584,9 @@ h.test("default setup renders blockquote tables with their quote marker", functi
     h.assert_true("quoted body row is hidden", concealed[5])
     h.assert_true("the quoted table is rendered", #blocks > 0)
 
-    for _, text in ipairs(blocks[1].texts) do
-      h.assert_true("rendered line keeps the quote marker: " .. text, text:find("^>%s") ~= nil)
+    for index, line in ipairs(blocks[1].lines) do
+      h.assert_eq("rendered line " .. index .. " starts with the quote marker", line[1][1], "> ")
+      h.assert_eq("rendered line " .. index .. " marker uses the quote highlight", line[1][2], "MarkdownTableWrapQuote")
     end
 
     inline.clear(buf)
