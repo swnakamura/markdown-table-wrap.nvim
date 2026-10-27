@@ -44,7 +44,11 @@ h.test("wrap ends a line at a hard break and counts wide characters as two cells
     return line.text
   end, wrap.wrap_cell(markdown.parse_inline("中文中文<br>日本語English"), 8))
 
-  h.assert_deep_eq("hard break, then an 8-cell fill with no break opportunity", texts, { "中文中文", "日本語En", "glish" })
+  h.assert_deep_eq(
+    "hard break, then an 8-cell fill with no break opportunity",
+    texts,
+    { "中文中文", "日本語En", "glish" }
+  )
 end)
 
 h.test("wrap prefers punctuation boundaries and preserves link metadata", function()
