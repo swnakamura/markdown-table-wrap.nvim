@@ -14,12 +14,14 @@ were added:
 
 | Area | Specs | Main regression risks covered |
 | --- | --- | --- |
-| GFM parsing | `parser_spec.lua` | delimiter validation, escaped/optional outer pipes, GFM missing-cell rows, fenced and block boundaries, linear large-document scanning |
+| GFM parsing | `parser_spec.lua` | delimiter validation, escaped/optional outer pipes, GFM missing-cell rows, fenced and block boundaries, one buffer read per document scan |
 | Inline Markdown | `markdown_spec.lua`, `wrap_spec.lua` | code, emphasis, links, icons, concealed code delimiters, hard breaks, CJK width, preferred wrap boundaries, metadata preservation |
-| Geometry | `width_spec.lua`, `render_spec.lua` | display width, padding, alignment, border variants, source-row mapping, fit-to-window and intentional overflow |
+| Geometry | `render_spec.lua` | display width, padding, alignment, border variants, source-row mapping, fit-to-window and intentional overflow |
 | Neovim views | `inline_spec.lua`, `mode_spec.lua`, `lifecycle_spec.lua` | conceal/extmarks, per-buffer debounce/state, window option restoration, buffer cleanup, view toggles |
+| Defaults | `defaults_spec.lua` | a bare `setup({})`: in-place rendering, cursor-row reveal, insert mode, line numbers, stable height, window options, blockquote tables |
 | Interaction | `nav_spec.lua`, `config_spec.lua`, `system_spec.lua` | cell navigation, commands, lazy-loading timing, configuration validation, filetype boundaries |
 | Themes | `theme_spec.lua` | presets, overrides, auto-detection, and theme files |
+| Export | `export_spec.lua` | TSV/CSV escaping, CSV formula guard, contextual and all-table export, registers and `'clipboard'`, `:MarkdownTableExport` |
 
 Headless tests prove parser and Neovim API behavior. Keep these manual checks
 for each release because terminal font shaping, compositor behavior, and other

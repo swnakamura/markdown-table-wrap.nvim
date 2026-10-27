@@ -598,6 +598,7 @@ markdown-table-wrap.nvim/
     ├── run.lua
     └── spec/
         ├── config_spec.lua
+        ├── defaults_spec.lua
         ├── export_spec.lua
         ├── inline_spec.lua
         ├── lifecycle_spec.lua
@@ -608,7 +609,6 @@ markdown-table-wrap.nvim/
         ├── render_spec.lua
         ├── system_spec.lua
         ├── theme_spec.lua
-        ├── width_spec.lua
         └── wrap_spec.lua
 ```
 
