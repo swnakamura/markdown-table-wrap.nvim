@@ -274,6 +274,42 @@ h.test("row-anchored replace omits number column when 'number' is off", function
   end)
 end)
 
+h.test("a table on line 1 keeps its top border on screen while its first row is revealed", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    preview_mode = "inline",
+    debounce_ms = 0,
+    render_all = true,
+    auto_preview = true,
+  })
+
+  h.with_buffer({
+    "| A | B |",
+    "| --- | --- |",
+    "| 1 | 2 |",
+    "",
+    "after",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+    plugin.refresh_auto({ force = true })
+
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    vim.api.nvim_exec_autocmds("CursorMoved", { buffer = buf })
+    vim.cmd("redraw")
+
+    h.assert_true(
+      "the top border is the first screen line: " .. h.screen_line(1),
+      h.screen_line(1):match("^╭") ~= nil
+    )
+    h.assert_eq("the revealed header row follows it", h.screen_line(2), "| A | B |")
+
+    inline.clear(buf)
+  end)
+end)
+
 h.test("row-anchored lines keep their original rendered line index", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")

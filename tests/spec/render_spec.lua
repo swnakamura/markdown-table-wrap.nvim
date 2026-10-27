@@ -250,6 +250,104 @@ h.test("render respects preferred widths when fit-to-window is disabled", functi
   end)
 end)
 
+h.test("max_width_ratio applies to the text area left after the number, sign and fold columns", function()
+  local parser = require("markdown-table-wrap.parser")
+  local render = require("markdown-table-wrap.render")
+  local sentence = "every word in this cell widens its column far past any budget the window offers"
+
+  h.with_buffer({
+    "| A | B |",
+    "| --- | --- |",
+    "| " .. sentence .. " | " .. sentence .. " |",
+  }, function(buf)
+    local parsed = parser.parse_at_cursor(buf, 3)
+    -- Not the only window, whose width is also 'columns': in a 60-column split
+    -- the window's own width and the screen's differ.
+    local original = vim.api.nvim_get_current_win()
+    vim.cmd("vsplit")
+    local win = vim.api.nvim_get_current_win()
+
+    -- Gutter widths are Neovim's: 'numberwidth' 4 (three lines need fewer
+    -- digits), signcolumn "yes" 2, foldcolumn "1" 1. Both cells are wider
+    -- than any budget, so the table fills its budget.
+    local ok, err = pcall(function()
+      vim.api.nvim_win_set_width(win, 60)
+      h.assert_deep_eq(
+        "the window is a 60-column split of an 80-column screen",
+        { vim.api.nvim_win_get_width(win), vim.o.columns },
+        { 60, 80 }
+      )
+      for _, case in ipairs({
+        { name = "no gutter", ratio = 1, number = false, signcolumn = "no", foldcolumn = "0", width = 60 },
+        { name = "'number'", ratio = 1, number = true, signcolumn = "no", foldcolumn = "0", width = 56 },
+        { name = "'signcolumn'", ratio = 1, number = false, signcolumn = "yes", foldcolumn = "0", width = 58 },
+        { name = "'foldcolumn'", ratio = 1, number = false, signcolumn = "no", foldcolumn = "1", width = 59 },
+        -- Half of the 53-column text area; half of 60 minus the gutter is 23.
+        { name = "all three, 0.5", ratio = 0.5, number = true, signcolumn = "yes", foldcolumn = "1", width = 26 },
+      }) do
+        vim.wo[win].number = case.number
+        vim.wo[win].signcolumn = case.signcolumn
+        vim.wo[win].foldcolumn = case.foldcolumn
+        local rendered = render.render_table(parsed, {
+          max_width_ratio = case.ratio,
+          min_col_width = 1,
+          max_col_width = 50,
+          use_unicode_border = true,
+          table_border = "rounded",
+          row_separator = false,
+        })
+        h.assert_eq(case.name .. " table width", vim.fn.strdisplaywidth(rendered.lines[1]), case.width)
+      end
+    end)
+
+    -- The gutter options were set in the split only, so closing it is the
+    -- whole cleanup.
+    if win ~= original and vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
+    if not ok then
+      error(err, 0)
+    end
+  end)
+end)
+
+h.test("a quoted table is narrowed by its quote marker so both fit the text area", function()
+  local parser = require("markdown-table-wrap.parser")
+  local render = require("markdown-table-wrap.render")
+  local sentence = "every word in this cell widens its column far past any budget the window offers"
+
+  -- The default marker is the raw ">" and a space, two columns per level, in
+  -- an 80-column window with no gutter.
+  for depth, width in pairs({ [0] = 80, [1] = 78, [2] = 76 }) do
+    local prefix = string.rep("> ", depth)
+    h.with_buffer({
+      prefix .. "| A | B |",
+      prefix .. "| --- | --- |",
+      prefix .. "| " .. sentence .. " | " .. sentence .. " |",
+    }, function(buf)
+      local rendered = render.render_table(parser.parse_at_cursor(buf, 3), {
+        max_width_ratio = 1,
+        min_col_width = 1,
+        max_col_width = 50,
+        use_unicode_border = true,
+        table_border = "rounded",
+        row_separator = false,
+        quote_icon = "auto",
+      })
+      h.assert_eq("depth " .. depth .. " marker", rendered.quote and rendered.quote.text or "", prefix)
+      local table_widths = {}
+      for _, line in ipairs(rendered.lines) do
+        table_widths[vim.fn.strdisplaywidth(line)] = true
+      end
+      h.assert_deep_eq(
+        "depth " .. depth .. ": every table line is " .. width .. " wide",
+        table_widths,
+        { [width] = true }
+      )
+    end)
+  end
+end)
+
 h.test("render highlights every wrapped header line as a header", function()
   local parser = require("markdown-table-wrap.parser")
   local render = require("markdown-table-wrap.render")
@@ -290,6 +388,59 @@ h.test("render highlights every wrapped header line as a header", function()
     end
 
     h.assert_eq("every wrapped header line uses header highlight", highlighted_header_lines, header_lines)
+  end)
+end)
+
+h.test("the floating preview colours code, bold and link text inside cells", function()
+  local plugin = require("markdown-table-wrap")
+  plugin.setup({ auto_preview = false })
+
+  h.with_buffer({
+    "| A | B |",
+    "| --- | --- |",
+    "| `snippet` | **heavy** [site](https://example.com) |",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    vim.cmd("MarkdownTableFloatPreview")
+    local float_win = vim.api.nvim_get_current_win()
+    local float_buf = vim.api.nvim_win_get_buf(float_win)
+    -- Top border, header, delimiter, then the body row.
+    local row = 3
+    local line = vim.api.nvim_buf_get_lines(float_buf, row, row + 1, false)[1] or ""
+
+    for _, case in ipairs({
+      { word = "snippet", group = "MarkdownTableWrapCode" },
+      { word = "heavy", group = "MarkdownTableWrapBold" },
+      { word = "site", group = "MarkdownTableWrapLink" },
+    }) do
+      local first, last = line:find(case.word, 1, true)
+      h.assert_true(case.word .. " is shown on the body row: " .. line, first ~= nil)
+      -- Not merely present: the colour shown is the highest-priority
+      -- highlight, and of equal priorities the later one in traversal order
+      -- (start position, then creation), which is the one drawn on top.
+      local top = nil
+      local info = vim.inspect_pos(float_buf, row, (first or 1) - 1, {
+        extmarks = true,
+        syntax = false,
+        treesitter = false,
+        semantic_tokens = false,
+      })
+      for _, mark in ipairs(info.extmarks) do
+        if not top or mark.opts.priority >= top.opts.priority then
+          top = mark
+        end
+      end
+      h.assert_deep_eq(
+        case.word .. " is coloured " .. case.group .. " from its first to its last byte",
+        top and { top.opts.hl_group, top.col, top.end_col },
+        { case.group, (first or 0) - 1, last }
+      )
+    end
+
+    if vim.api.nvim_win_get_config(float_win).relative ~= "" then
+      vim.api.nvim_win_close(float_win, true)
+    end
   end)
 end)
 

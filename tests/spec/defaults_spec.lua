@@ -303,6 +303,151 @@ h.test("default setup reveals the source row under the cursor and follows it", f
   end)
 end)
 
+h.test("default setup draws the rows above the revealed row above it and the rows below it below it", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({})
+
+  -- Screen lines of table_lines with the cursor outside the table: two lines
+  -- before it, the 7 rendered lines (top border, header, delimiter, alpha,
+  -- separator, beta, bottom border), then the two lines after it. With the
+  -- cursor on a table row, that row's raw source takes the place of its
+  -- rendered line and every other line stays where it was.
+  local rendered = {
+    "^intro paragraph$",
+    "^$",
+    "^╭",
+    "^│ Name ",
+    "^├",
+    "^│ alpha ",
+    "^├",
+    "^│ beta ",
+    "^╰",
+    "^$",
+    "^outro$",
+  }
+  local screen_row_of = { [3] = 4, [4] = 5, [5] = 6, [6] = 8 }
+
+  h.with_buffer(table_lines, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    plugin.refresh_auto()
+
+    for _, cursor in ipairs({ 3, 4, 5, 6 }) do
+      move_cursor(buf, cursor)
+      vim.cmd("redraw")
+      local expected = vim.deepcopy(rendered)
+      expected[screen_row_of[cursor]] = "^" .. vim.pesc(table_lines[cursor]) .. "$"
+
+      for row, pattern in ipairs(expected) do
+        local line = h.screen_line(row)
+        h.assert_true(
+          string.format("cursor on %d: screen line %d matches %s, got %q", cursor, row, pattern, line),
+          line:find(pattern) ~= nil
+        )
+      end
+    end
+
+    inline.clear(buf)
+    plugin.state.inline_buf = nil
+  end)
+end)
+
+h.test("default setup draws the table where its source rows were while the cursor is outside it", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({})
+
+  -- Patterns for screen lines with the cursor on line 1: the two lines before
+  -- the table, its rendered lines (7 for table_lines, as counted in the
+  -- in-place test; 5 with one body row and no separator), then what follows.
+  for _, case in ipairs({
+    {
+      name = "a table followed by prose",
+      lines = table_lines,
+      screen = { "^intro paragraph$", "^$", "^╭", [9] = "^╰", [10] = "^$", [11] = "^outro$" },
+    },
+    {
+      name = "a table ending the buffer",
+      lines = { unpack(table_lines, 1, 5) },
+      screen = { "^intro paragraph$", "^$", "^╭", [7] = "^╰" },
+    },
+  }) do
+    h.with_buffer(case.lines, function(buf)
+      vim.bo[buf].filetype = "markdown"
+      vim.api.nvim_win_set_cursor(0, { 1, 0 })
+      plugin.refresh_auto()
+      vim.cmd("redraw")
+
+      for row, pattern in pairs(case.screen) do
+        local line = h.screen_line(row)
+        h.assert_true(
+          string.format("%s: screen line %d matches %s, got %q", case.name, row, pattern, line),
+          line:find(pattern) ~= nil
+        )
+      end
+
+      inline.clear(buf)
+      plugin.state.inline_buf = nil
+    end)
+  end
+end)
+
+h.test("default setup shows the raw table in Visual mode and renders it again afterwards", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  -- Not the default 80 ms debounce: refreshes are debounced, and only their
+  -- arrival is under test.
+  plugin.setup({ debounce_ms = 1 })
+  h.assert_true("Visual mode clears by default", plugin.config.clear_on_visual)
+
+  h.with_buffer(table_lines, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+    plugin.refresh_auto()
+
+    for _, case in ipairs({
+      { keys = "v", mode = "v" },
+      { keys = "V", mode = "V" },
+      { keys = "<C-v>", mode = "\22" },
+    }) do
+      local label = case.keys .. ": "
+      h.assert_true(label .. "the table is rendered before Visual mode", inline.is_active(buf))
+
+      -- Typed keys, not a fired ModeChanged, so the mode really changes; under
+      -- feedkeys "x" a lone Visual key stays in Visual mode.
+      local ok, err = pcall(function()
+        feed(case.keys)
+        h.assert_eq(label .. "Visual mode was entered", vim.api.nvim_get_mode().mode, case.mode)
+        -- A refresh arriving mid-selection, as scrolling schedules one.
+        vim.api.nvim_exec_autocmds("WinScrolled", {})
+        h.drain_timers(1)
+        h.assert_false(label .. "nothing is rendered in Visual mode", inline.is_active(buf))
+        for _, lnum in ipairs({ 3, 4, 5, 6 }) do
+          h.assert_eq(label .. "row " .. lnum .. " shows as raw source in Visual mode", raw_height(lnum), 1)
+        end
+      end)
+      feed("<Esc>")
+      if not ok then
+        error(err, 0)
+      end
+
+      h.assert_eq(label .. "Visual mode was left", vim.api.nvim_get_mode().mode, "n")
+      h.drain_timers(1)
+      h.assert_true(label .. "leaving Visual mode renders the table again", inline.is_active(buf))
+      for _, lnum in ipairs({ 3, 4, 6 }) do
+        h.assert_eq(label .. "row " .. lnum .. " is rendered again", raw_height(lnum), 0)
+      end
+    end
+
+    inline.clear(buf)
+    plugin.state.inline_buf = nil
+  end)
+end)
+
 h.test("default setup keeps the table rendered in insert mode", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")

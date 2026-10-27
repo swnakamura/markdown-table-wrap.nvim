@@ -52,6 +52,18 @@ function M.drain_timers(ms)
   end, 1)
 end
 
+-- The text drawn on screen line `row` of the current window's text area
+-- (number, sign and fold columns left out), trailing blanks trimmed. Reads
+-- the grid as last drawn, so call :redraw first.
+function M.screen_line(row)
+  local info = vim.fn.getwininfo(vim.api.nvim_get_current_win())[1]
+  local cells = {}
+  for col = info.wincol + info.textoff, info.wincol + info.width - 1 do
+    table.insert(cells, vim.fn.screenstring(info.winrow + row - 1, col))
+  end
+  return (table.concat(cells):gsub("%s+$", ""))
+end
+
 function M.with_buffer(lines, fn)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_set_current_buf(buf)

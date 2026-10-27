@@ -351,6 +351,50 @@ h.test("a window that keeps its rendering on leave keeps its options", function(
   delete_buffer(buf_b)
 end)
 
+h.test("closing a rendered window hands its conceallevel back before Neovim stores it with the buffer", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({
+    auto_preview = false,
+    preview_mode = "inline",
+    render_all = true,
+    debounce_ms = 0,
+  })
+
+  local win_a = vim.api.nvim_get_current_win()
+  local buf_plain = new_markdown_buffer({ "plain text" })
+  vim.api.nvim_win_set_buf(win_a, buf_plain)
+  vim.cmd("vsplit")
+  local win_rendered = vim.api.nvim_get_current_win()
+  local buf_a = new_markdown_buffer(table_lines)
+  vim.api.nvim_win_set_buf(win_rendered, buf_a)
+
+  vim.wo[win_a].conceallevel = 0
+  vim.wo[win_rendered].conceallevel = 0
+  plugin.refresh_auto({ bufnr = buf_a, winid = win_rendered, force = true })
+  h.assert_eq("rendering raises conceallevel", vim.wo[win_rendered].conceallevel, 2)
+
+  -- Not a check on the closed window, whose options go with it: Neovim gives
+  -- a closing window's options to the next window that shows its buffer
+  -- (:help local-options), and a leaked conceallevel surfaces there.
+  vim.api.nvim_set_current_win(win_a)
+  vim.api.nvim_win_close(win_rendered, true)
+  vim.api.nvim_win_set_buf(win_a, buf_a)
+  h.assert_eq("the rendering raises conceallevel in its new window", vim.wo[win_a].conceallevel, 2)
+
+  plugin.disable_auto_preview()
+  h.assert_false("the rendering is cleared", inline.is_active(buf_a))
+  h.assert_eq("clearing hands back the conceallevel from before the rendering", vim.wo[win_a].conceallevel, 0)
+
+  inline.dispose(buf_a)
+  if vim.api.nvim_win_is_valid(win_rendered) then
+    vim.api.nvim_win_close(win_rendered, true)
+  end
+  delete_buffer(buf_a)
+  delete_buffer(buf_plain)
+end)
+
 h.test("BufWipeout disposes all per-buffer runtime state", function()
   local plugin = require("markdown-table-wrap")
 
