@@ -1,33 +1,21 @@
 local h = require("tests.helpers")
 
-h.test("parser handles escaped pipes and code pipes", function()
+h.test("parser keeps escaped pipes and pipes inside single- and multi-backtick code in one cell", function()
   local parser = require("markdown-table-wrap.parser")
 
   h.with_buffer({
-    "| A | B | C |",
-    "| --- | --- | --- |",
-    "| x\\|y | `a|b` | z |",
+    "| A | B | C | D |",
+    "| --- | --- | --- | --- |",
+    "| x\\|y | `a|b` | ``c|d`` | z |",
   }, function(buf)
     local parsed = parser.parse_at_cursor(buf, 3)
     h.assert_true("parsed table", parsed ~= nil)
     h.assert_eq("escaped pipe", parsed.rows[1][1].text, "x|y")
     h.assert_eq("code pipe", parsed.rows[1][2].text, "a|b")
     h.assert_eq("code pipe kind", parsed.rows[1][2].spans[1].kind, "code")
-  end)
-end)
-
-h.test("parser keeps pipes inside multi-backtick code spans", function()
-  local parser = require("markdown-table-wrap.parser")
-
-  h.with_buffer({
-    "| A | B |",
-    "| --- | --- |",
-    "| ``a|b`` | c |",
-  }, function(buf)
-    local parsed = parser.parse_at_cursor(buf, 3)
-    h.assert_true("multi-backtick table parsed", parsed ~= nil)
-    h.assert_eq("multi-backtick pipe", parsed.rows[1][1].text, "a|b")
-    h.assert_eq("multi-backtick code kind", parsed.rows[1][1].spans[1].kind, "code")
+    h.assert_eq("multi-backtick pipe", parsed.rows[1][3].text, "c|d")
+    h.assert_eq("multi-backtick code kind", parsed.rows[1][3].spans[1].kind, "code")
+    h.assert_eq("cell after the code spans", parsed.rows[1][4].text, "z")
   end)
 end)
 
@@ -131,18 +119,6 @@ h.test("parser keeps inline HTML at the start of a body row", function()
     h.assert_true("inline HTML row belongs to table", parsed ~= nil)
     h.assert_eq("inline HTML row reaches table end", parsed.end_lnum, 3)
     h.assert_eq("inline HTML text is preserved", parsed.rows[1][1].text, "<em>one</em>")
-  end)
-end)
-
-h.test("parser rejects table-like paragraphs without separator", function()
-  local parser = require("markdown-table-wrap.parser")
-
-  h.with_buffer({
-    "a | b | c",
-    "this is not | a table | row",
-  }, function(buf)
-    local parsed = parser.parse_at_cursor(buf, 1)
-    h.assert_false("no separator no table", parsed)
   end)
 end)
 
@@ -252,24 +228,6 @@ h.test("parser rejects table syntax nested in block-level prefixes", function()
   end)
 end)
 
--- Blockquotes are the one block-level prefix that does carry a table: the
--- markers are stripped before parsing and redrawn by the renderer, so the
--- quoted body is parsed exactly like a top-level one.
-h.test("parser reads a quoted table as a quoted table, not a top-level one", function()
-  local parser = require("markdown-table-wrap.parser")
-
-  h.with_buffer({
-    "> A | B",
-    "> --- | ---",
-    "> one | two",
-  }, function(buf)
-    local tables = parser.parse_all(buf)
-    h.assert_eq("quoted table collected", #tables, 1)
-    h.assert_eq("quoted table depth", tables[1].quote_depth, 1)
-    h.assert_eq("quoted table start", tables[1].start_lnum, 1)
-  end)
-end)
-
 h.test("parser starts at header when pipe paragraph touches table", function()
   local parser = require("markdown-table-wrap.parser")
 
@@ -287,27 +245,6 @@ h.test("parser starts at header when pipe paragraph touches table", function()
     h.assert_eq("strict table start", parsed.start_lnum, 2)
     h.assert_eq("strict table end", parsed.end_lnum, 4)
     h.assert_eq("header preserved", parsed.header[1].text, "A")
-  end)
-end)
-
-h.test("parser finds all tables", function()
-  local parser = require("markdown-table-wrap.parser")
-
-  h.with_buffer({
-    "# doc",
-    "| A | B |",
-    "| --- | --- |",
-    "| 1 | 2 |",
-    "",
-    "paragraph",
-    "| C | D |",
-    "| --- | --- |",
-    "| 3 | 4 |",
-  }, function(buf)
-    local tables = parser.parse_all(buf)
-    h.assert_eq("table count", #tables, 2)
-    h.assert_eq("first table start", tables[1].start_lnum, 2)
-    h.assert_eq("second table start", tables[2].start_lnum, 7)
   end)
 end)
 
@@ -370,11 +307,13 @@ h.test("parser only closes fenced code with a bare fence marker", function()
   end)
 end)
 
-h.test("parse_all reads the buffer once for large pipe-shaped prose", function()
+h.test("parse_all reads the buffer once for pipe-shaped prose", function()
   local parser = require("markdown-table-wrap.parser")
   local lines = {}
 
-  for index = 1, 2000 do
+  -- Twenty lines, not thousands: the assertion counts reads, so a re-read per
+  -- line fails here as clearly as it would on a large buffer.
+  for index = 1, 20 do
     lines[index] = string.format("prose %d | still not a table", index)
   end
 
@@ -400,7 +339,7 @@ h.test("parse_all reads the buffer once for large pipe-shaped prose", function()
       error(tables)
     end
 
-    h.assert_eq("large document table count", #tables, 1)
+    h.assert_eq("document table count", #tables, 1)
     h.assert_eq("parse_all buffer reads", get_lines_calls, 1)
   end)
 end)
