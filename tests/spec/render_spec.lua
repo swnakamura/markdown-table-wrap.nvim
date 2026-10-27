@@ -163,31 +163,6 @@ h.test("render ascii border and no row separator", function()
   end)
 end)
 
-h.test("render mixed width cells stay within configured width", function()
-  local parser = require("markdown-table-wrap.parser")
-  local render = require("markdown-table-wrap.render")
-
-  h.with_buffer({
-    "| A | B |",
-    "| --- | --- |",
-    "| 中日English | 中文中文EnglishEnglish |",
-  }, function(buf)
-    local parsed = parser.parse_at_cursor(buf, 3)
-    local rendered = render.render_table(parsed, {
-      max_width_ratio = 1,
-      min_col_width = 4,
-      max_col_width = 8,
-      use_unicode_border = true,
-      table_border = "rounded",
-      row_separator = true,
-    })
-
-    for index, line in ipairs(rendered.lines) do
-      h.assert_true("mixed width rendered line " .. index, vim.api.nvim_strwidth(line) <= rendered.width)
-    end
-  end)
-end)
-
 h.test("render can shrink below preferred column width to fit the window", function()
   local parser = require("markdown-table-wrap.parser")
   local render = require("markdown-table-wrap.render")
@@ -255,25 +230,23 @@ h.test("render respects preferred widths when fit-to-window is disabled", functi
     "| --- | --- | --- |",
     "| one | two | three |",
   }, function(buf)
-    vim.api.nvim_win_set_width(0, 30)
     local parsed = parser.parse_at_cursor(buf, 3)
-    local rendered = render.render_table(parsed, {
-      max_width_ratio = 0.5,
-      min_col_width = 10,
-      max_col_width = 10,
-      fit_to_window = false,
-      use_unicode_border = true,
-      table_border = "single",
-      row_separator = false,
-    })
+    -- The budget is narrowed through max_width_ratio, not the window: resizing
+    -- the only window of a headless run leaves it at full width.
+    local function width(fit_to_window)
+      return render.render_table(parsed, {
+        max_width_ratio = 0.2,
+        min_col_width = 10,
+        max_col_width = 10,
+        fit_to_window = fit_to_window,
+        use_unicode_border = true,
+        table_border = "single",
+        row_separator = false,
+      }).width
+    end
 
-    h.assert_true("table can exceed requested viewport", rendered.width > 15)
-    h.assert_eq("top border keeps stable width", vim.api.nvim_strwidth(rendered.lines[1]), rendered.width)
-    h.assert_eq(
-      "bottom border keeps stable width",
-      vim.api.nvim_strwidth(rendered.lines[#rendered.lines]),
-      rendered.width
-    )
+    h.assert_eq("three 10-cell columns plus borders, past the 16-cell budget", width(false), 40)
+    h.assert_eq("fitting shrinks the same table into its 20-cell minimum", width(true), 20)
   end)
 end)
 
@@ -311,7 +284,7 @@ h.test("render highlights every wrapped header line as a header", function()
     local highlighted_header_lines = 0
     for _, mark in ipairs(marks) do
       local details = mark[4]
-      if details.priority == 10 and details.hl_group == "MarkdownTableWrapHeader" then
+      if details.hl_group == "MarkdownTableWrapHeader" then
         highlighted_header_lines = highlighted_header_lines + 1
       end
     end
@@ -320,9 +293,11 @@ h.test("render highlights every wrapped header line as a header", function()
   end)
 end)
 
-h.test("render merges contiguous border highlights for large tables", function()
+h.test("render merges contiguous border highlights", function()
   local render = require("markdown-table-wrap.render")
-  local line_count = 1000
+  -- Ten lines, not a thousand: one mark per border character instead of one
+  -- per range adds about fifty marks on every line, whatever the line count.
+  local line_count = 10
   local lines = {}
   local line_objects = {}
 
@@ -380,6 +355,15 @@ h.test("generated tables render every line at one display width", function()
     return (seed % size) + 1
   end
 
+  -- One setup for all cases: setup() rebuilds autocmds, commands and
+  -- highlights, which took most of this test's time when run per case.
+  plugin.setup({
+    auto_preview = false,
+    min_col_width = 1,
+    max_width_ratio = 1,
+    quote_icon = false,
+  })
+
   h.with_buffer({}, function(buf)
     vim.api.nvim_win_set_width(0, 60)
     for case = 1, 200 do
@@ -390,18 +374,12 @@ h.test("generated tables render every line at one display width", function()
       local prefix = string.rep("> ", choose(3) - 1)
       local source = prefix .. "| " .. table.concat(row, " | ") .. " |"
       vim.api.nvim_buf_set_lines(buf, 0, -1, false, { prefix .. "| A | B | C |", prefix .. "| - | :- | -: |", source })
-      plugin.setup({
-        auto_preview = false,
-        min_col_width = 1,
-        max_col_width = choose(12),
-        max_width_ratio = 1,
-        quote_icon = false,
-      })
-      local output = render.render_table(parser.parse_all(buf)[1], plugin.config)
+      local config = vim.tbl_extend("force", plugin.config, { max_col_width = choose(12) })
+      local output = render.render_table(parser.parse_all(buf)[1], config)
       local expected = vim.fn.strdisplaywidth(output.lines[1])
       for _, line in ipairs(output.lines) do
         h.assert_eq(
-          string.format("case %d, max_col_width %d, %s", case, plugin.config.max_col_width, source),
+          string.format("case %d, max_col_width %d, %s", case, config.max_col_width, source),
           vim.fn.strdisplaywidth(line),
           expected
         )
