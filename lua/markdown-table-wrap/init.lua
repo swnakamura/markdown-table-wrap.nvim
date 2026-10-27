@@ -50,7 +50,6 @@ local defaults = {
   themes = {},
   extra_filetypes = {},
   highlights = {},
-  map_gx = false,
   link = {
     icon = "",
     wiki = { icon = " ", highlight = "MarkdownTableWrapWikiLink", scope_highlight = "MarkdownTableWrapWikiLink" },
@@ -76,9 +75,6 @@ M.state = {
   paused_buffers = {},
   auto_buffers = {},
   buffer_modes = {},
-  gx_fallbacks = {},
-  gx_installed = {},
-  gx_callbacks = {},
   last_signature = {},
   did_setup = false,
   visual_buffers = {},
@@ -151,7 +147,6 @@ local function validate_config()
   M.config.clear_on_visual = M.config.clear_on_visual ~= false
   M.config.inline_line_numbers = M.config.inline_line_numbers ~= false
   M.config.inline_stable_height = M.config.inline_stable_height ~= false
-  M.config.map_gx = M.config.map_gx == true
 
   if type(M.config.extra_filetypes) ~= "table" or #M.config.extra_filetypes == 0 then
     M.config.extra_filetypes = {}
@@ -227,105 +222,6 @@ local function validate_config()
   then
     M.config.highlight_preset = defaults.highlight_preset
   end
-end
-
-local function current_gx_mapping(bufnr)
-  return vim.api.nvim_buf_call(bufnr, function()
-    local mapping = vim.fn.maparg("gx", "n", false, true)
-    return type(mapping) == "table" and next(mapping) ~= nil and mapping or nil
-  end)
-end
-
-local function owns_gx_mapping(bufnr, mapping)
-  local callback = M.state.gx_callbacks[bufnr]
-  return M.state.gx_installed[bufnr] == true and callback ~= nil and mapping and mapping.callback == callback
-end
-
-local function restore_gx_mapping(bufnr)
-  if not M.state.gx_installed[bufnr] then
-    return
-  end
-
-  local fallback = M.state.gx_fallbacks[bufnr]
-  local current = vim.api.nvim_buf_is_valid(bufnr) and current_gx_mapping(bufnr) or nil
-  if owns_gx_mapping(bufnr, current) then
-    pcall(vim.keymap.del, "n", "gx", { buffer = bufnr })
-    if fallback and fallback.buffer == 1 and vim.api.nvim_buf_is_valid(bufnr) then
-      pcall(vim.api.nvim_buf_call, bufnr, function()
-        vim.fn.mapset("n", 0, fallback)
-      end)
-    end
-  end
-  M.state.gx_fallbacks[bufnr] = nil
-  M.state.gx_installed[bufnr] = nil
-  M.state.gx_callbacks[bufnr] = nil
-end
-
-local function invoke_gx_mapping(mapping)
-  if mapping and type(mapping.callback) == "function" then
-    local ok, result = pcall(mapping.callback)
-    if ok and mapping.expr == 1 and type(result) == "string" and result ~= "" then
-      if mapping.replace_keycodes ~= 0 then
-        result = vim.api.nvim_replace_termcodes(result, true, false, true)
-      end
-      vim.api.nvim_feedkeys(result, mapping.noremap == 1 and "n" or "m", false)
-    end
-    return ok
-  end
-
-  if mapping and mapping.expr == 1 and type(mapping.rhs) == "string" and mapping.rhs ~= "" then
-    local ok, result = pcall(vim.api.nvim_eval, mapping.rhs)
-    if ok and type(result) == "string" and result ~= "" then
-      if mapping.replace_keycodes ~= 0 then
-        result = vim.api.nvim_replace_termcodes(result, true, false, true)
-      end
-      vim.api.nvim_feedkeys(result, mapping.noremap == 1 and "n" or "m", false)
-    end
-    return ok
-  end
-
-  if mapping and type(mapping.rhs) == "string" and mapping.rhs ~= "" then
-    local keys = vim.api.nvim_replace_termcodes(mapping.rhs, true, false, true)
-    vim.api.nvim_feedkeys(keys, mapping.noremap == 1 and "n" or "m", false)
-    return true
-  end
-
-  local target = vim.fn.expand("<cfile>")
-  if target ~= "" and vim.ui and type(vim.ui.open) == "function" then
-    vim.ui.open(target)
-    return true
-  end
-  return false
-end
-
-local function attach_link_keymap(bufnr)
-  if not vim.api.nvim_buf_is_valid(bufnr) then
-    return
-  end
-
-  if not M.config.map_gx or not is_supported_filetype(vim.bo[bufnr].filetype) then
-    restore_gx_mapping(bufnr)
-    return
-  end
-
-  local current = current_gx_mapping(bufnr)
-  if not owns_gx_mapping(bufnr, current) then
-    M.state.gx_fallbacks[bufnr] = current
-  end
-
-  local proxy = function()
-    local parser = require("markdown-table-wrap.parser")
-    local current_bufnr = vim.api.nvim_get_current_buf()
-    local table_info = parser.parse_at_cursor(current_bufnr, vim.api.nvim_win_get_cursor(0)[1])
-    if table_info then
-      require("markdown-table-wrap.nav").open_link()
-      return
-    end
-    invoke_gx_mapping(M.state.gx_fallbacks[current_bufnr])
-  end
-  vim.keymap.set("n", "gx", proxy, { buffer = bufnr, silent = true, desc = "Open Markdown table link" })
-  M.state.gx_installed[bufnr] = true
-  M.state.gx_callbacks[bufnr] = proxy
 end
 
 local function close_existing()
@@ -813,9 +709,6 @@ local function create_autocmds()
       M.state.paused_buffers[args.buf] = nil
       M.state.auto_buffers[args.buf] = nil
       M.state.buffer_modes[args.buf] = nil
-      M.state.gx_fallbacks[args.buf] = nil
-      M.state.gx_installed[args.buf] = nil
-      M.state.gx_callbacks[args.buf] = nil
       M.state.last_signature[args.buf] = nil
       M.state.visual_buffers[args.buf] = nil
       if M.state.inline_buf == args.buf then
@@ -835,14 +728,6 @@ local function create_autocmds()
     group = M.state.augroup,
     callback = function()
       require("markdown-table-wrap.theme").apply(M.config)
-    end,
-  })
-
-  vim.api.nvim_create_autocmd("FileType", {
-    group = M.state.augroup,
-    pattern = "*",
-    callback = function(args)
-      attach_link_keymap(args.buf)
     end,
   })
 end
@@ -878,10 +763,6 @@ function M.setup(opts)
   create_autocmds()
   require("markdown-table-wrap.theme").apply(M.config)
   M.state.did_setup = true
-
-  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-    attach_link_keymap(bufnr)
-  end
 
   vim.api.nvim_create_user_command("MarkdownTablePreview", function()
     M.preview()
@@ -956,10 +837,6 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("MarkdownTablePrevRow", function()
     require("markdown-table-wrap.nav").move_vertical(-1)
   end, { desc = "Move to the same Markdown table cell in the previous row", force = true })
-
-  vim.api.nvim_create_user_command("MarkdownTableOpenLink", function()
-    require("markdown-table-wrap.nav").open_link()
-  end, { desc = "Open the first link in the current Markdown table cell", force = true })
 
   vim.api.nvim_create_user_command("MarkdownTableExport", function(opts_cmd)
     local format = vim.trim(opts_cmd.args)

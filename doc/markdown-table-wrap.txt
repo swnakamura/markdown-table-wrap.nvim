@@ -142,10 +142,6 @@ COMMANDS                                      *markdown-table-wrap-commands*
 :MarkdownTablePrevRow
     Move to the same source table cell in the previous row.
 
-                                                      *:MarkdownTableOpenLink*
-:MarkdownTableOpenLink
-    Open the first link in the current source table cell.
-
                                                         *:MarkdownTableExport*
 :MarkdownTableExport[!] [tsv|csv]
     Copy the table under the cursor as TSV (the default) or CSV. Add ! to
@@ -160,6 +156,17 @@ COMMANDS                                      *markdown-table-wrap-commands*
     or carriage return with ' so spreadsheets do not evaluate them as
     formulas; this includes negative numbers. A table whose body rows hold
     more cells than its header is refused, and no register is changed.
+
+Links in a table open with Neovim's own |gx|: the row under the cursor is
+revealed as raw Markdown, so gx works there as on any other line. With the
+cursor on the URL, it opens the URL. With the cursor on the label of
+[label](url) (or the alt text of an image), it opens the URL only where
+Tree-sitter highlighting runs in the buffer: Neovim starts it for markdown
+but not for quarto or rmd, where gx on the label opens the label word unless
+you start Tree-sitter yourself. On the non-standard (text)[url] form, gx
+opens the URL only from the URL part. The floating preview shows rendered
+labels without their URLs, so it has its own buffer-local gx, which opens the
+link under the cursor.
 
 ==============================================================================
 CONFIGURATION                              *markdown-table-wrap-configuration*
@@ -209,7 +216,6 @@ Default setup:
         cern = { pattern = "cern.ch", icon = " " },
       },
     },
-    map_gx = false,
   })
 <
 
@@ -282,11 +288,6 @@ link~
     Icon configuration for links, wiki links, images, and URL pattern matches.
     Standard Markdown links use [text](url). The plugin also accepts
     (text)[url] as a convenience form inside table cells.
-
-map_gx~                                    *markdown-table-wrap-map-gx*
-    Opt into a buffer-local gx mapping for table links in Source buffers.
-    Defaults to false, leaving the user's existing mapping untouched.
-    |:MarkdownTableOpenLink| can also be mapped manually.
 
 extra_filetypes~
     List of additional filetypes to enable table rendering for. The default

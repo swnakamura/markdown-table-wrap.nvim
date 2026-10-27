@@ -426,35 +426,6 @@ function M.inline_to_text(text, opts)
   return M.parse_inline(text, opts).text
 end
 
-function M.extract_links(value, opts)
-  opts = type(opts) == "table" and opts or {}
-  local parsed_input = type(value) == "table" and value.tokens ~= nil
-  local parsed = parsed_input and value or M.parse_inline(value, opts)
-  local links = {}
-  for _, token in ipairs(parsed.tokens or {}) do
-    if
-      (token.kind == "link" or token.kind == "image" or token.kind == "wiki_link")
-      and token.target
-      and not token.nested_target
-    then
-      table.insert(links, {
-        start_col = parsed_input and opts.coordinates ~= "source" and token.render_start_col or token.source_start_col,
-        end_col = parsed_input and opts.coordinates ~= "source" and token.render_end_col or token.source_end_col,
-        source_start_col = token.source_start_col,
-        source_end_col = token.source_end_col,
-        text = token.text,
-        url = token.target,
-        target = token.target,
-        kind = token.kind,
-      })
-    end
-  end
-  table.sort(links, function(a, b)
-    return a.start_col < b.start_col
-  end)
-  return links
-end
-
 local function link_icon(span, config)
   local link = (config or {}).link or {}
   local url = span.url or span.target or ""

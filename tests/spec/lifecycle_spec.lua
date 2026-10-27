@@ -382,9 +382,6 @@ h.test("BufWipeout disposes all per-buffer runtime state", function()
     "paused_buffers",
     "last_signature",
     "visual_buffers",
-    "gx_fallbacks",
-    "gx_installed",
-    "gx_callbacks",
   }) do
     h.assert_eq(field .. " is cleared for wiped buffer", (plugin.state[field] or {})[buf], nil)
   end
@@ -434,82 +431,5 @@ h.test("repeated setup closes an open floating preview", function()
     plugin.setup({ auto_preview = false, preview_mode = "float" })
     h.assert_false("old float window is closed", vim.api.nvim_win_is_valid(float_win))
     h.assert_false("old float buffer is deleted", vim.api.nvim_buf_is_valid(float_buf))
-  end)
-end)
-
-h.test("gx delegates ordinary text to the previous buffer-local mapping", function()
-  local plugin = require("markdown-table-wrap")
-  local fallback_calls = 0
-
-  h.with_buffer({ "ordinary Markdown prose" }, function(buf)
-    vim.bo[buf].filetype = "markdown"
-    vim.keymap.set("n", "gx", function()
-      fallback_calls = fallback_calls + 1
-    end, { buffer = buf, silent = true, desc = "Lifecycle test gx fallback" })
-
-    plugin.setup({ auto_preview = false, map_gx = true })
-    vim.api.nvim_win_set_cursor(0, { 1, 0 })
-    vim.cmd("normal gx")
-
-    h.assert_eq("previous buffer-local gx mapping is called once", fallback_calls, 1)
-
-    plugin.setup({ auto_preview = false, map_gx = false })
-    vim.cmd("normal gx")
-    h.assert_eq("disabling the proxy restores the previous mapping", fallback_calls, 2)
-  end)
-end)
-
-h.test("gx proxy evaluates an existing string expression mapping", function()
-  local plugin = require("markdown-table-wrap")
-  local expression_calls = 0
-  _G.__markdown_table_wrap_test_expr = function()
-    expression_calls = expression_calls + 1
-    return "<Ignore>"
-  end
-
-  h.with_buffer({ "ordinary Markdown prose" }, function(buf)
-    vim.bo[buf].filetype = "markdown"
-    vim.keymap.set("n", "gx", "v:lua.__markdown_table_wrap_test_expr()", {
-      buffer = buf,
-      expr = true,
-      replace_keycodes = false,
-      silent = true,
-      desc = "Lifecycle string expr gx fallback",
-    })
-
-    plugin.setup({ auto_preview = false, map_gx = true })
-    vim.cmd("normal gx")
-    h.assert_eq("proxy evaluates the previous expression mapping", expression_calls, 1)
-
-    plugin.setup({ auto_preview = false, map_gx = false })
-    local restored = vim.api.nvim_buf_call(buf, function()
-      return vim.fn.maparg("gx", "n", false, true)
-    end)
-    h.assert_true(
-      "restored mapping preserves replace_keycodes when reported",
-      restored.replace_keycodes == nil or restored.replace_keycodes == 0
-    )
-    vim.cmd("normal gx")
-    h.assert_eq("restored expression mapping still evaluates", expression_calls, 2)
-  end)
-
-  _G.__markdown_table_wrap_test_expr = nil
-end)
-
-h.test("gx teardown preserves a later user mapping even with the same description", function()
-  local plugin = require("markdown-table-wrap")
-  local later_calls = 0
-
-  h.with_buffer({ "ordinary Markdown prose" }, function(buf)
-    vim.bo[buf].filetype = "markdown"
-    plugin.setup({ auto_preview = false, map_gx = true })
-
-    vim.keymap.set("n", "gx", function()
-      later_calls = later_calls + 1
-    end, { buffer = buf, desc = "Open Markdown table link" })
-
-    plugin.setup({ auto_preview = false, map_gx = false })
-    vim.cmd("normal gx")
-    h.assert_eq("later user mapping is not mistaken for the proxy", later_calls, 1)
   end)
 end)

@@ -50,7 +50,7 @@ Floating preview for long table reading:
 - Provides source-aware table cell navigation commands.
 - Can also render the same table in a floating window.
 - Provides `:MarkdownTableToggleInline` for quickly switching between source and inline rendering.
-- Leaves the existing `gx` mapping untouched by default; table-aware source-buffer link handling is opt-in.
+- Never maps `gx` in your buffers: on the revealed raw row, Neovim's own `gx` opens a link from its URL, and from the label of `[label](url)` where Tree-sitter highlighting runs (Neovim starts it for `markdown`); the floating preview has its own `gx`.
 - Does not edit the source buffer.
 - No external binaries.
 - Neovim 0.11+.
@@ -111,7 +111,6 @@ return {
       themes = {},
       extra_filetypes = {},
       highlights = {},
-      map_gx = false,
       link = {
         icon = "",
         wiki = { icon = " ", highlight = "MarkdownTableWrapWikiLink", scope_highlight = "MarkdownTableWrapWikiLink" },
@@ -212,16 +211,20 @@ manual control and access to the optional floating mode.
 - `:MarkdownTablePrevCell` moves to the previous source cell in the current table row.
 - `:MarkdownTableNextRow` moves to the same source cell in the next table row.
 - `:MarkdownTablePrevRow` moves to the same source cell in the previous table row.
-- `:MarkdownTableOpenLink` opens the first link in the current source table cell.
 - `:MarkdownTableExport[!] [tsv|csv]` copies the table under the cursor as TSV (the default) or CSV; with `!` it copies every table in the buffer, separated by blank lines.
 
 Press `q` inside the floating preview window to close the float.
 
-`map_gx = false` by default, so the plugin does not replace your existing `gx`
-mapping. Run `:MarkdownTableOpenLink` directly, add your own keymap, or set
-`map_gx = true` to opt into the buffer-local table-aware mapping. The command
-reads the current source table cell and opens the actual URL from
-`[text](url)`, `(text)[url]`, or image links.
+Links in a table open with Neovim's own `gx`: the row under the cursor is
+revealed as raw Markdown, so `gx` works there as on any other line. With the
+cursor on the URL, it opens the URL. With the cursor on the label of
+`[label](url)` (or the alt text of an image), it opens the URL only where
+Tree-sitter highlighting runs in the buffer: Neovim starts it for `markdown`
+but not for `quarto` or `rmd`, where `gx` on the label opens the label word
+unless you start Tree-sitter yourself. On the non-standard `(text)[url]` form,
+`gx` opens the URL only from the URL part. The floating preview shows rendered
+labels without their URLs, so it has its own buffer-local `gx`, which opens the
+link under the cursor.
 
 `:MarkdownTableExport` exports the text each cell displays: Markdown syntax is
 removed, so `[GitHub](https://github.com)` becomes `GitHub`, and `<br>` becomes
@@ -266,7 +269,6 @@ require("markdown-table-wrap").setup({
   themes = {},
   extra_filetypes = {},
   highlights = {},
-  map_gx = false,
   link = {
     icon = "",
     wiki = { icon = " ", highlight = "MarkdownTableWrapWikiLink", scope_highlight = "MarkdownTableWrapWikiLink" },
@@ -311,7 +313,6 @@ Options:
 - `theme_dir`: optional directory containing custom theme files named `<preset>.lua`; the file name must match `highlight_preset`.
 - `themes`: inline custom theme table keyed by `highlight_preset`.
 - `highlights`: override highlight specs by semantic key.
-- `map_gx`: opt into a buffer-local `gx` mapping for table links in Source buffers. It defaults to `false`, leaving the user's existing mapping untouched.
 - `link`: icon configuration for links, wiki links, images, and URL pattern matches.
 - `extra_filetypes`: list of additional filetypes to enable table rendering for. The default is `{}`, meaning the built-in `markdown`, `md`, `quarto`, `rmd`, and `rmarkdown` filetypes render tables.
 
@@ -521,7 +522,7 @@ The suite currently covers:
 - Link icons, `==highlight==`, inline custom themes, and theme-directory loading.
 - Whole-buffer automatic rendering through Neovim extmarks.
 - Compact continuous-border highlight spans and colorscheme highlight replay.
-- Source-aware cell navigation, configuration validation, and opt-in table-aware `gx` installation when a filetype pre-dates plugin setup.
+- Source-aware cell navigation, configuration validation, the floating preview's `gx`, and leaving `gx` in Markdown buffers to Neovim whether the filetype is set before or after setup.
 - Buffer-local deferred refresh, view/auto state, option restoration, and
   wipeout cleanup.
 

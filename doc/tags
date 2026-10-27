@@ -6,7 +6,6 @@
 :MarkdownTableInlinePreview	markdown-table-wrap.txt	/*:MarkdownTableInlinePreview*
 :MarkdownTableNextCell	markdown-table-wrap.txt	/*:MarkdownTableNextCell*
 :MarkdownTableNextRow	markdown-table-wrap.txt	/*:MarkdownTableNextRow*
-:MarkdownTableOpenLink	markdown-table-wrap.txt	/*:MarkdownTableOpenLink*
 :MarkdownTablePrevCell	markdown-table-wrap.txt	/*:MarkdownTablePrevCell*
 :MarkdownTablePrevRow	markdown-table-wrap.txt	/*:MarkdownTablePrevRow*
 :MarkdownTablePreview	markdown-table-wrap.txt	/*:MarkdownTablePreview*
@@ -23,7 +22,6 @@ markdown-table-wrap-highlight-preset	markdown-table-wrap.txt	/*markdown-table-wr
 markdown-table-wrap-highlights	markdown-table-wrap.txt	/*markdown-table-wrap-highlights*
 markdown-table-wrap-installation	markdown-table-wrap.txt	/*markdown-table-wrap-installation*
 markdown-table-wrap-limitations	markdown-table-wrap.txt	/*markdown-table-wrap-limitations*
-markdown-table-wrap-map-gx	markdown-table-wrap.txt	/*markdown-table-wrap-map-gx*
 markdown-table-wrap-overview	markdown-table-wrap.txt	/*markdown-table-wrap-overview*
 markdown-table-wrap-quote-icon	markdown-table-wrap.txt	/*markdown-table-wrap-quote-icon*
 markdown-table-wrap-render-markdown	markdown-table-wrap.txt	/*markdown-table-wrap-render-markdown*

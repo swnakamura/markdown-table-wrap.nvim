@@ -37,6 +37,11 @@ h.test("markdown parses link variants and icons", function()
   h.assert_true("reversed link url", link_urls["https://bilibili.com"])
   h.assert_true("wiki link", kinds.wiki_link ~= nil)
   h.assert_true("image link", kinds.image ~= nil)
+  h.assert_eq("image url", kinds.image and kinds.image.url, "image.png")
+
+  local autolink = markdown.parse_inline("<https://example.com>").spans[1] or {}
+  h.assert_eq("autolink kind", autolink.kind, "link")
+  h.assert_eq("autolink url", autolink.url, "https://example.com")
 
   local with_icons = markdown.apply_link_icons(parsed, {
     link = {
@@ -53,13 +58,6 @@ h.test("markdown parses link variants and icons", function()
   h.assert_true("bilibili icon", with_icons.text:find("B bili", 1, true) ~= nil)
   h.assert_true("wiki icon", with_icons.text:find("W Wiki", 1, true) ~= nil)
   h.assert_true("image icon", with_icons.text:find("I alt", 1, true) ~= nil)
-
-  local extracted =
-    markdown.extract_links("[YouTube](https://youtube.com) (Bili)[https://bilibili.com] ![Alt](image.png)")
-  h.assert_eq("extract link count", #extracted, 3)
-  h.assert_eq("extract first url", extracted[1].url, "https://youtube.com")
-  h.assert_eq("extract reversed url", extracted[2].url, "https://bilibili.com")
-  h.assert_eq("extract image url", extracted[3].url, "image.png")
 end)
 
 h.test("markdown removes concealed code delimiters from link labels", function()
@@ -70,16 +68,6 @@ h.test("markdown removes concealed code delimiters from link labels", function()
   h.assert_eq("code-wrapped link span start", parsed.spans[1].start_col, 0)
   h.assert_eq("code-wrapped link span end", parsed.spans[1].end_col, #"overview")
   h.assert_eq("code-wrapped link URL", parsed.spans[1].url, "curriculum/week-02/overview.md")
-end)
-
-h.test("markdown extracts links from parsed cells", function()
-  local markdown = require("markdown-table-wrap.markdown")
-  local parsed = markdown.parse_inline("[youtube](https://www.youtube.com)")
-  local links = markdown.extract_links(parsed)
-
-  h.assert_eq("parsed cell link count", #links, 1)
-  h.assert_eq("parsed cell link text", links[1].text, "youtube")
-  h.assert_eq("parsed cell link url", links[1].url, "https://www.youtube.com")
 end)
 
 h.test("markdown display text follows CommonMark inline rules, <br> breaks and unmatched syntax", function()

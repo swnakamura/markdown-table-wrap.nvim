@@ -38,47 +38,44 @@ h.test("setup normalizes invalid configuration without breaking rendering", func
   h.assert_eq("invalid theme directory is ignored", plugin.config.theme_dir, nil)
 end)
 
-h.test("setup installs gx when Markdown filetype predates plugin loading", function()
+h.test("setup with a leftover map_gx = true leaves buffer-local gx alone", function()
   local plugin = require("markdown-table-wrap")
 
-  h.with_buffer({
-    "| Name | Link |",
-    "| --- | --- |",
-    "| Video | [YouTube](https://youtube.com) |",
-  }, function(buf)
-    vim.bo[buf].filetype = "markdown"
-    plugin.setup({ auto_preview = false, map_gx = true })
+  -- Not maparg alone: it falls back to Neovim's global gx, present even under -u NONE.
+  local function buffer_gx(buf)
+    return vim.api.nvim_buf_call(buf, function()
+      local mapping = vim.fn.maparg("gx", "n", false, true)
+      return mapping.buffer == 1 and mapping or nil
+    end)
+  end
 
-    local mapping = nil
-    for _, item in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
-      if item.lhs == "gx" then
-        mapping = item
-        break
-      end
+  for _, filetype_first in ipairs({ true, false }) do
+    local label = filetype_first and "filetype set before setup: " or "filetype set after setup: "
+    local bare = vim.api.nvim_create_buf(false, true)
+    local mapped = vim.api.nvim_create_buf(false, true)
+    vim.keymap.set("n", "gx", "<Cmd>let g:markdown_table_wrap_test_gx = 1<CR>", {
+      buffer = mapped,
+      silent = true,
+      desc = "Config test user gx",
+    })
+    local user_gx = buffer_gx(mapped)
+    h.assert_true(label .. "the user's gx is buffer-local before setup", user_gx ~= nil)
+
+    if filetype_first then
+      vim.bo[bare].filetype = "markdown"
+      vim.bo[mapped].filetype = "markdown"
+      plugin.setup({ auto_preview = false, map_gx = true })
+    else
+      plugin.setup({ auto_preview = false, map_gx = true })
+      vim.bo[bare].filetype = "markdown"
+      vim.bo[mapped].filetype = "markdown"
     end
 
-    h.assert_true("gx mapping is present", mapping ~= nil)
-    h.assert_eq("gx mapping belongs to this plugin", mapping.desc, "Open Markdown table link")
-  end)
-end)
-
-h.test("safe defaults leave gx untouched", function()
-  local plugin = require("markdown-table-wrap")
-
-  h.with_buffer({ "ordinary Markdown prose" }, function(buf)
-    vim.bo[buf].filetype = "markdown"
-    plugin.setup({ auto_preview = false })
-
-    local plugin_mapping = false
-    for _, item in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
-      if item.lhs == "gx" and item.desc == "Open Markdown table link" then
-        plugin_mapping = true
-      end
-    end
-
-    h.assert_false("gx override is opt-in", plugin.config.map_gx)
-    h.assert_false("default setup does not add a buffer-local gx", plugin_mapping)
-  end)
+    h.assert_eq(label .. "no buffer-local gx is installed", buffer_gx(bare), nil)
+    h.assert_deep_eq(label .. "the user's buffer-local gx is unchanged", buffer_gx(mapped), user_gx)
+    vim.api.nvim_buf_delete(bare, { force = true })
+    vim.api.nvim_buf_delete(mapped, { force = true })
+  end
 end)
 
 h.test("ColorScheme reapplies configured highlights", function()
@@ -104,7 +101,6 @@ h.test("all documented commands exist after setup", function()
     "MarkdownTableToggleAutoPreview",
     "MarkdownTableRefresh",
     "MarkdownTableToggleInline",
-    "MarkdownTableOpenLink",
   }) do
     h.assert_eq("command exists: " .. command, vim.fn.exists(":" .. command), 2)
   end
@@ -123,6 +119,12 @@ h.test("viewport scrolling commands are gone after setup", function()
   }) do
     h.assert_eq("removed command is absent: " .. command, vim.fn.exists(":" .. command), 0)
   end
+end)
+
+h.test("MarkdownTableOpenLink is gone after setup", function()
+  local plugin = require("markdown-table-wrap")
+  plugin.setup({ auto_preview = false })
+  h.assert_eq("removed command is absent", vim.fn.exists(":MarkdownTableOpenLink"), 0)
 end)
 
 h.test("Reader mode is gone and inline stays the default preview mode", function()
