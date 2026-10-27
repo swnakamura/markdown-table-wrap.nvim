@@ -21,6 +21,19 @@ local function delete_buffer(buf)
   end
 end
 
+-- Waits until every timer started earlier with at most `ms` has fired: timers
+-- with one timeout fire in start order, so a sentinel started last fires last.
+-- A fixed vim.wait would have to guess the delay and sleep it out every run.
+local function drain_timers(ms)
+  local fired = false
+  vim.defer_fn(function()
+    fired = true
+  end, ms)
+  vim.wait(1000, function()
+    return fired
+  end, 1)
+end
+
 h.test("debounced refreshes are isolated by buffer and keep their scheduled target", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
@@ -29,7 +42,7 @@ h.test("debounced refreshes are isolated by buffer and keep their scheduled targ
     auto_preview = false,
     preview_mode = "inline",
     render_all = true,
-    debounce_ms = 20,
+    debounce_ms = 1,
   })
 
   local win_a = vim.api.nvim_get_current_win()
@@ -53,7 +66,7 @@ h.test("debounced refreshes are isolated by buffer and keep their scheduled targ
 
   local refreshed = vim.wait(500, function()
     return inline.is_active(buf_a) and inline.is_active(buf_b)
-  end, 10)
+  end, 1)
 
   h.assert_true("both buffer refreshes run", refreshed)
   h.assert_true("first buffer receives its own render", inline.is_active(buf_a))
@@ -72,26 +85,24 @@ end)
 
 h.test("repeated setup invalidates refreshes from the previous setup epoch", function()
   local plugin = require("markdown-table-wrap")
-  plugin.setup({ auto_preview = false, preview_mode = "inline", debounce_ms = 20 })
+  local inline = require("markdown-table-wrap.inline")
+  local opts = { auto_preview = false, preview_mode = "inline", debounce_ms = 1 }
+  plugin.setup(opts)
 
   h.with_buffer(table_lines, function(buf)
     vim.bo[buf].filetype = "markdown"
-    local original_refresh = plugin.refresh_auto
-    local refresh_calls = 0
-    plugin.refresh_auto = function()
-      refresh_calls = refresh_calls + 1
-    end
+    local win = vim.api.nvim_get_current_win()
 
-    plugin.schedule_refresh({ bufnr = buf, winid = vim.api.nvim_get_current_win() })
-    plugin.setup({ auto_preview = false, preview_mode = "inline", debounce_ms = 20 })
-    plugin.schedule_refresh({ bufnr = buf, winid = vim.api.nvim_get_current_win() })
-    vim.wait(200, function()
-      return refresh_calls >= 1
-    end, 10)
-    vim.wait(40)
+    -- Not a counting stub of refresh_auto, which would tie the test to today's
+    -- call target: the stale refresh is forced, so it would render visibly,
+    -- and the unforced one after setup renders nothing but reuses its token
+    -- number, which leaves the epoch check as the only thing stopping it.
+    plugin.schedule_refresh({ bufnr = buf, winid = win, force = true })
+    plugin.setup(opts)
+    plugin.schedule_refresh({ bufnr = buf, winid = win })
+    drain_timers(1)
 
-    plugin.refresh_auto = original_refresh
-    h.assert_eq("only the current setup epoch refreshes", refresh_calls, 1)
+    h.assert_false("the refresh scheduled before setup never renders", inline.is_active(buf))
   end)
 end)
 
@@ -359,7 +370,7 @@ h.test("BufWipeout disposes all per-buffer runtime state", function()
   plugin.setup({
     auto_preview = false,
     render_all = true,
-    debounce_ms = 30,
+    debounce_ms = 1,
   })
 
   local buf = new_markdown_buffer(table_lines)
@@ -373,7 +384,9 @@ h.test("BufWipeout disposes all per-buffer runtime state", function()
   h.assert_true("buffer is paused before the wipe", plugin.state.paused_buffers[buf] == true)
   h.assert_true("buffer has a render signature before the wipe", plugin.state.last_signature[buf] ~= nil)
   vim.api.nvim_buf_delete(buf, { force = true })
-  vim.wait(80)
+  -- Not skipped: the refresh scheduled above fires after the wipe and must
+  -- not bring any of the state back.
+  drain_timers(1)
 
   for _, field in ipairs({
     "auto_buffers",
@@ -421,16 +434,19 @@ h.test("repeated setup closes an open floating preview", function()
   h.with_buffer(table_lines, function(buf)
     vim.bo[buf].filetype = "markdown"
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    local source_win = vim.api.nvim_get_current_win()
     plugin.float_preview()
-    local float_win = plugin.state.win
-    local float_buf = plugin.state.buf
-    h.assert_true("float opens before setup", vim.api.nvim_win_is_valid(float_win))
+    -- Not plugin.state.win, which is private: the float takes focus.
+    local float_win = vim.api.nvim_get_current_win()
+    local float_buf = vim.api.nvim_win_get_buf(float_win)
+    h.assert_true(
+      "a float opens before setup",
+      float_win ~= source_win and vim.api.nvim_win_get_config(float_win).relative ~= ""
+    )
 
     plugin.setup({ auto_preview = false, preview_mode = "float" })
-    h.assert_true("old float window is closed", not vim.api.nvim_win_is_valid(float_win))
-    h.assert_true("old float buffer is deleted", not vim.api.nvim_buf_is_valid(float_buf))
-    h.assert_eq("float window state is cleared", plugin.state.win, nil)
-    h.assert_eq("float buffer state is cleared", plugin.state.buf, nil)
+    h.assert_false("old float window is closed", vim.api.nvim_win_is_valid(float_win))
+    h.assert_false("old float buffer is deleted", vim.api.nvim_buf_is_valid(float_buf))
   end)
 end)
 
