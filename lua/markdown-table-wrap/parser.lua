@@ -457,6 +457,7 @@ local function parse_table_at(quote, start_lnum)
   end
 
   local rows = {}
+  local excess_cells = 0
   local end_lnum = start_lnum + 1
   local lnum = start_lnum + 2
 
@@ -466,7 +467,9 @@ local function parse_table_at(quote, start_lnum)
       break
     end
 
-    table.insert(rows, normalize_row(split_pipe_row(line), #header))
+    local cells = split_pipe_row(line)
+    excess_cells = excess_cells + math.max(0, #cells - #header)
+    table.insert(rows, normalize_row(cells, #header))
     end_lnum = lnum
     lnum = lnum + 1
   end
@@ -481,6 +484,7 @@ local function parse_table_at(quote, start_lnum)
     header = normalize_row(header, #header),
     align = align,
     rows = rows,
+    excess_cells = excess_cells,
   }
 end
 

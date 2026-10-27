@@ -217,6 +217,21 @@ COMMANDS                                      *markdown-table-wrap-commands*
 :MarkdownTableOpenLink
     Open the first link in the current source table cell.
 
+                                                        *:MarkdownTableExport*
+:MarkdownTableExport[!] [tsv|csv]
+    Copy the table under the cursor as TSV (the default) or CSV. Add ! to
+    export every table in the buffer, separated by blank lines.
+
+    Each cell exports the text it displays: Markdown syntax is removed and
+    <br> becomes a line break. The value is written to the unnamed and "0
+    registers like a yank, and to "+ / "* when 'clipboard' contains
+    unnamedplus / unnamed. TSV escapes tab, carriage return, line break and
+    backslash as \t, \r, \n and \\. CSV quotes fields containing commas,
+    quotes or line breaks, and prefixes values starting with =, +, -, @, tab
+    or carriage return with ' so spreadsheets do not evaluate them as
+    formulas; this includes negative numbers. A table whose body rows hold
+    more cells than its header is refused, and no register is changed.
+
                                                      *:MarkdownTableScrollDown*
 :MarkdownTableScrollDown
     Scroll the rendered table view down.
@@ -472,6 +487,14 @@ Example:
   local config = table_wrap.get_buffer_config(0)
   local mode = table_wrap.get_preview_mode(0)
 <
+
+export_table({opts})~                   *markdown-table-wrap.export_table()*
+    The Lua entry point behind |:MarkdownTableExport|. Return true and the
+    exported text, or false without changing any register. {opts} accepts:
+      format              "tsv" (default) or "csv".
+      all                 Export every table in the buffer.
+      csv_formula_policy  "raw" keeps formula-leading CSV values unprefixed.
+      silent              Suppress the notification.
 
 ==============================================================================
 HIGHLIGHTS                                  *markdown-table-wrap-highlights*

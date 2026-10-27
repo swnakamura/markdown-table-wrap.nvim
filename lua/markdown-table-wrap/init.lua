@@ -618,6 +618,10 @@ function M.close_reader()
   return false
 end
 
+function M.export_table(opts)
+  return require("markdown-table-wrap.export").export(opts)
+end
+
 function M.toggle_reader()
   if require("markdown-table-wrap.reader").is_reader(0) then
     return M.close_reader()
@@ -1259,6 +1263,19 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("MarkdownTableOpenLink", function()
     require("markdown-table-wrap.nav").open_link()
   end, { desc = "Open the first link in the current Markdown table cell", force = true })
+
+  vim.api.nvim_create_user_command("MarkdownTableExport", function(opts_cmd)
+    local format = vim.trim(opts_cmd.args)
+    M.export_table({ format = format ~= "" and format or "tsv", all = opts_cmd.bang })
+  end, {
+    desc = "Export the current Markdown table as TSV or CSV",
+    bang = true,
+    nargs = "?",
+    complete = function()
+      return { "tsv", "csv" }
+    end,
+    force = true,
+  })
 
   vim.api.nvim_create_user_command("MarkdownTableScrollDown", function(opts_cmd)
     local count = tonumber(opts_cmd.count) or 1

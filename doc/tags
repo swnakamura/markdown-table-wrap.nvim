@@ -2,6 +2,7 @@
 :MarkdownTableDisableAutoPreview	markdown-table-wrap.txt	/*:MarkdownTableDisableAutoPreview*
 :MarkdownTableEditSource	markdown-table-wrap.txt	/*:MarkdownTableEditSource*
 :MarkdownTableEnableAutoPreview	markdown-table-wrap.txt	/*:MarkdownTableEnableAutoPreview*
+:MarkdownTableExport	markdown-table-wrap.txt	/*:MarkdownTableExport*
 :MarkdownTableFloatPreview	markdown-table-wrap.txt	/*:MarkdownTableFloatPreview*
 :MarkdownTableInlinePreview	markdown-table-wrap.txt	/*:MarkdownTableInlinePreview*
 :MarkdownTableNextCell	markdown-table-wrap.txt	/*:MarkdownTableNextCell*
@@ -39,6 +40,7 @@ markdown-table-wrap-render-markdown	markdown-table-wrap.txt	/*markdown-table-wra
 markdown-table-wrap-theme-dir	markdown-table-wrap.txt	/*markdown-table-wrap-theme-dir*
 markdown-table-wrap-themes	markdown-table-wrap.txt	/*markdown-table-wrap-themes*
 markdown-table-wrap-view-choice	markdown-table-wrap.txt	/*markdown-table-wrap-view-choice*
+markdown-table-wrap.export_table()	markdown-table-wrap.txt	/*markdown-table-wrap.export_table()*
 markdown-table-wrap.get_buffer_config()	markdown-table-wrap.txt	/*markdown-table-wrap.get_buffer_config()*
 markdown-table-wrap.get_preview_mode()	markdown-table-wrap.txt	/*markdown-table-wrap.get_preview_mode()*
 markdown-table-wrap.txt	markdown-table-wrap.txt	/*markdown-table-wrap.txt*

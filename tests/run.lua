@@ -22,6 +22,7 @@ local specs = {
   "tests.spec.system_spec",
   "tests.spec.lifecycle_spec",
   "tests.spec.defaults_spec",
+  "tests.spec.export_spec",
 }
 
 -- A spec that throws while loading used to abort this file, which meant

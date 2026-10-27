@@ -10,6 +10,7 @@ All notable changes to `markdown-table-wrap.nvim` are documented here.
 - `quote_icon` option controlling that marker: `"auto"` (default) follows render-markdown.nvim's quote bar when that plugin is loaded and uses the raw `>` otherwise, any string fixes the marker, and `false` draws none.
 - `inline_line_numbers` (default `true`) draws window line numbers into rendered Inline table rows, honouring `'number'` and `'relativenumber'` and updating as the cursor moves.
 - `inline_stable_height` (default `true`) pads the revealed cursor row with blank virtual lines so an Inline table keeps a constant screen height while the cursor moves through it.
+- `:MarkdownTableExport[!] [tsv|csv]` and `export_table()`, ported from upstream v0.5.0 (with its later register and formula fixes): copy the table under the cursor, or every table with `!`, as TSV or CSV into the unnamed and `"0` registers, and into `"+` / `"*` as `'clipboard'` asks. CSV prefixes formula-leading values with `'` unless `csv_formula_policy = "raw"`; a table with more body cells than header cells is refused instead of being exported without them.
 
 ### Changed
 

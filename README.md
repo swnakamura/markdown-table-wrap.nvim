@@ -311,6 +311,7 @@ inline and floating modes.
 - `:MarkdownTableNextRow` moves to the same source cell in the next table row.
 - `:MarkdownTablePrevRow` moves to the same source cell in the previous table row.
 - `:MarkdownTableOpenLink` opens the first link in the current source table cell.
+- `:MarkdownTableExport[!] [tsv|csv]` copies the table under the cursor as TSV (the default) or CSV; with `!` it copies every table in the buffer, separated by blank lines.
 - `:MarkdownTableScrollDown` scrolls the rendered table view down without moving through source rows.
 - `:MarkdownTableScrollUp` scrolls the rendered table view up without moving through source rows.
 - `:MarkdownTableScrollTop` jumps the rendered table viewport to the top.
@@ -324,6 +325,17 @@ mapping. Run `:MarkdownTableOpenLink` directly, add your own keymap, or set
 `map_gx = true` to opt into the buffer-local table-aware mapping. The command
 reads the current source table cell and opens the actual URL from
 `[text](url)`, `(text)[url]`, or image links.
+
+`:MarkdownTableExport` exports the text each cell displays: Markdown syntax is
+removed, so `[GitHub](https://github.com)` becomes `GitHub`, and `<br>` becomes
+a line break. The result goes to the unnamed and `"0` registers like a yank,
+and to `"+` / `"*` when `'clipboard'` contains `unnamedplus` / `unnamed`. TSV
+escapes tabs, carriage returns, line breaks, and backslashes as `\t`, `\r`,
+`\n`, and `\\`. CSV quotes fields containing commas, quotes, or line breaks,
+and prefixes values starting with `=`, `+`, `-`, `@`, a tab, or a carriage
+return with `'` so spreadsheets do not evaluate them as formulas; note that
+this includes negative numbers. A table with body rows holding more cells than
+its header is refused rather than exported without the extra cells.
 
 ## Configuration
 
@@ -565,6 +577,14 @@ local mode = table_wrap.get_preview_mode(0)
 - `get_preview_mode(bufnr?)` returns the buffer's effective `"reader"`,
   `"inline"`, or `"float"` mode without mutating global setup.
 
+`export_table(opts?)` is the Lua entry point behind `:MarkdownTableExport`. It
+returns `true` and the exported text, or `false` without touching any register.
+
+- `format`: `"tsv"` (default) or `"csv"`.
+- `all`: export every table in the buffer instead of the one under the cursor.
+- `csv_formula_policy`: `"raw"` keeps formula-leading CSV values unprefixed.
+- `silent`: suppress the notification.
+
 ## Example
 
 With the default configuration, opening a Markdown file renders this table automatically. You can also run `:MarkdownTablePreview` manually:
@@ -696,6 +716,7 @@ markdown-table-wrap.nvim/
 │   └── 03-floating-long-table.png
 ├── lua/
 │   └── markdown-table-wrap/
+│       ├── export.lua
 │       ├── health.lua
 │       ├── init.lua
 │       ├── inline.lua
@@ -716,6 +737,7 @@ markdown-table-wrap.nvim/
     ├── run.lua
     └── spec/
         ├── config_spec.lua
+        ├── export_spec.lua
         ├── inline_spec.lua
         ├── lifecycle_spec.lua
         ├── markdown_spec.lua
