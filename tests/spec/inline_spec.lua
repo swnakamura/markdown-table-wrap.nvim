@@ -40,50 +40,6 @@ h.test("inline whole-buffer render uses extmarks and conceal options", function(
   end)
 end)
 
-h.test("cursor wrap scope preserves prose wrapping outside tables", function()
-  local plugin = require("markdown-table-wrap")
-  local inline = require("markdown-table-wrap.inline")
-
-  plugin.setup({
-    preview_mode = "inline",
-    debounce_ms = 0,
-    render_all = true,
-    auto_preview = true,
-    -- Opt in: 'wrap' is left alone by default so the revealed cursor row can
-    -- soft-wrap, and inline_wrap_scope is only consulted once this is true.
-    inline_disable_wrap = true,
-    inline_wrap_scope = "cursor",
-  })
-
-  h.with_buffer({
-    "A long Markdown paragraph should wrap normally.",
-    "",
-    "| A | B |",
-    "| --- | --- |",
-    "| one | two |",
-    "",
-    "Another long Markdown paragraph should also wrap normally.",
-  }, function(buf)
-    vim.bo[buf].filetype = "markdown"
-    vim.wo.wrap = true
-
-    vim.api.nvim_win_set_cursor(0, { 1, 0 })
-    plugin.refresh_auto({ force = true })
-    h.assert_true("wrap is kept outside the table", vim.wo.wrap)
-
-    vim.api.nvim_win_set_cursor(0, { 3, 0 })
-    inline.update_wrap_for_cursor(buf)
-    h.assert_false("wrap is disabled inside the table", vim.wo.wrap)
-
-    vim.api.nvim_win_set_cursor(0, { 7, 0 })
-    inline.update_wrap_for_cursor(buf)
-    h.assert_true("wrap is restored after leaving the table", vim.wo.wrap)
-
-    inline.clear(buf)
-    h.assert_true("wrap remains enabled after clearing", vim.wo.wrap)
-  end)
-end)
-
 h.test("floating preview includes highlight extmarks", function()
   local parser = require("markdown-table-wrap.parser")
   local render = require("markdown-table-wrap.render")
@@ -192,56 +148,35 @@ h.test("floating preview preserves inline rendering in render_all mode", functio
   end)
 end)
 
-h.test("inline viewport scroll changes rendered table slice", function()
+h.test("inline replace refuses a rendering without one row group per source line", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
+  local parser = require("markdown-table-wrap.parser")
+  local render = require("markdown-table-wrap.render")
 
-  plugin.setup({
-    preview_mode = "inline",
-    debounce_ms = 0,
-    render_all = true,
-    auto_preview = true,
-    min_col_width = 4,
-    max_col_width = 8,
-    inline_viewport_scrolling = true,
-  })
+  plugin.setup({ auto_preview = false })
 
   h.with_buffer({
     "| A | B |",
     "| --- | --- |",
-    "| one | alpha beta gamma delta epsilon |",
+    "| one | two |",
   }, function(buf)
     vim.bo[buf].filetype = "markdown"
-    vim.api.nvim_win_set_cursor(0, { 2, 0 })
-    plugin.refresh_auto({ force = true })
-
-    local function first_overlay_text()
-      local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
-      for _, mark in ipairs(marks) do
-        if mark[2] == 0 and mark[4] and mark[4].virt_text then
-          local parts = {}
-          for _, chunk in ipairs(mark[4].virt_text) do
-            table.insert(parts, chunk[1])
-          end
-          return table.concat(parts)
-        end
-      end
-      return ""
+    local original = render.render_table
+    render.render_table = function(...)
+      local rendered = original(...)
+      table.remove(rendered.groups)
+      return rendered
     end
+    local ok, err = pcall(inline.show, buf, parser.parse_at_cursor(buf, 1), plugin.get_buffer_config(buf))
+    render.render_table = original
 
-    local before = first_overlay_text()
-    vim.cmd("MarkdownTableScrollDown")
-    local after = first_overlay_text()
-    vim.cmd("MarkdownTableScrollBottom")
-    local bottom = first_overlay_text()
-    vim.cmd("MarkdownTableScrollTop")
-    local top = first_overlay_text()
-
-    h.assert_true("before has top border", before:find("╭", 1, true) ~= nil)
-    h.assert_true("after scroll advances viewport", after ~= before)
-    h.assert_true("bottom changes viewport", bottom ~= before)
-    h.assert_eq("top restores viewport", top, before)
-
+    h.assert_false("show raises instead of rendering", ok)
+    h.assert_true(
+      "the error names the mismatch: " .. tostring(err),
+      tostring(err):find("2 row groups for 3 source lines", 1, true) ~= nil
+    )
+    h.assert_false("nothing is left rendered", inline.is_active(buf))
     inline.clear(buf)
   end)
 end)
@@ -562,52 +497,6 @@ h.test("row-anchored replace omits number column when 'number' is off", function
   end)
 end)
 
-h.test("inline viewport toggle switches between sliced and full rendering", function()
-  local plugin = require("markdown-table-wrap")
-  local inline = require("markdown-table-wrap.inline")
-
-  plugin.setup({
-    preview_mode = "inline",
-    debounce_ms = 0,
-    render_all = true,
-    auto_preview = true,
-    min_col_width = 4,
-    max_col_width = 8,
-    inline_viewport_scrolling = true,
-  })
-
-  h.with_buffer({
-    "| A | B |",
-    "| --- | --- |",
-    "| one | alpha beta gamma delta epsilon |",
-  }, function(buf)
-    vim.bo[buf].filetype = "markdown"
-    vim.api.nvim_win_set_cursor(0, { 2, 0 })
-    plugin.refresh_auto({ force = true })
-
-    local function has_virt_lines()
-      local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
-      for _, mark in ipairs(marks) do
-        if mark[4] and mark[4].virt_lines then
-          return true
-        end
-      end
-      return false
-    end
-
-    h.assert_false("viewport mode avoids extra virt_lines", has_virt_lines())
-    vim.cmd("MarkdownTableToggleInlineViewport")
-    h.assert_false("viewport disabled", plugin.get_buffer_config(buf).inline_viewport_scrolling)
-    h.assert_true("full mode uses virt_lines", has_virt_lines())
-
-    vim.cmd("MarkdownTableToggleInlineViewport")
-    h.assert_true("viewport enabled", plugin.get_buffer_config(buf).inline_viewport_scrolling)
-    h.assert_false("viewport mode restored", has_virt_lines())
-
-    inline.clear(buf)
-  end)
-end)
-
 h.test("row-anchored lines keep their original rendered line index", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
@@ -617,7 +506,6 @@ h.test("row-anchored lines keep their original rendered line index", function()
     debounce_ms = 0,
     render_all = true,
     auto_preview = true,
-    inline_viewport_scrolling = false,
     row_separator = true,
   })
 

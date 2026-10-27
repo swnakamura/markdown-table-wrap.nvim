@@ -95,14 +95,13 @@ h.test("repeated setup invalidates refreshes from the previous setup epoch", fun
   end)
 end)
 
-h.test("interactive mode auto and viewport choices stay buffer local", function()
+h.test("interactive mode and auto choices stay buffer local", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
 
   plugin.setup({
     auto_preview = false,
     preview_mode = "float",
-    inline_viewport_scrolling = false,
     render_all = true,
     debounce_ms = 0,
   })
@@ -117,11 +116,6 @@ h.test("interactive mode auto and viewport choices stay buffer local", function(
   h.assert_eq("global preview mode stays immutable", plugin.config.preview_mode, "float")
   h.assert_false("global auto default stays immutable", plugin.config.auto_preview)
 
-  plugin.toggle_inline_viewport_scrolling()
-  h.assert_true("first buffer enables viewport", plugin.get_buffer_config(buf_a).inline_viewport_scrolling)
-  h.assert_false("second buffer keeps viewport default", plugin.get_buffer_config(buf_b).inline_viewport_scrolling)
-  h.assert_false("global viewport default stays immutable", plugin.config.inline_viewport_scrolling)
-
   plugin.disable_auto_preview()
   vim.api.nvim_set_current_buf(buf_b)
   h.assert_true("inline can be enabled independently in second buffer", plugin.toggle_inline())
@@ -131,7 +125,6 @@ h.test("interactive mode auto and viewport choices stay buffer local", function(
   h.assert_true("second buffer auto preview is enabled", plugin.get_buffer_config(buf_b).auto_preview)
   h.assert_false("first buffer auto preview remains disabled", plugin.get_buffer_config(buf_a).auto_preview)
   h.assert_eq("first buffer keeps its inline mode", plugin.get_preview_mode(buf_a), "inline")
-  h.assert_true("first buffer keeps its viewport override", plugin.get_buffer_config(buf_a).inline_viewport_scrolling)
   h.assert_false("global auto default is still immutable", plugin.config.auto_preview)
 
   inline.dispose(buf_a)
@@ -155,9 +148,6 @@ h.test("leaving an inline window or buffer restores its local options", function
     -- "an unfocused window keeps the options its rendering depends on" and
     -- "a window that keeps its rendering on leave keeps its options".
     render_all = false,
-    -- Opt in: 'wrap' and 'concealcursor' are left alone by default.
-    inline_disable_wrap = true,
-    inline_wrap_scope = "always",
     debounce_ms = 0,
   })
 
@@ -169,26 +159,23 @@ h.test("leaving an inline window or buffer restores its local options", function
   local buf_b = new_markdown_buffer({ "plain text" })
   vim.api.nvim_win_set_buf(win_b, buf_b)
 
-  vim.wo[win_a].wrap = true
   vim.wo[win_a].conceallevel = 0
-  vim.wo[win_a].concealcursor = ""
   vim.api.nvim_set_current_win(win_a)
   plugin.refresh_auto({ bufnr = buf_a, winid = win_a, force = true })
-
-  h.assert_false("inline disables wrap", vim.wo[win_a].wrap)
   h.assert_eq("inline raises conceallevel", vim.wo[win_a].conceallevel, 2)
-  h.assert_eq("inline sets concealcursor", vim.wo[win_a].concealcursor, "nvc")
 
   vim.api.nvim_set_current_win(win_b)
-  h.assert_true("WinLeave restores wrap", vim.wo[win_a].wrap)
+  h.assert_false("WinLeave releases the rendering", inline.is_active(buf_a))
   h.assert_eq("WinLeave restores conceallevel", vim.wo[win_a].conceallevel, 0)
-  h.assert_eq("WinLeave restores concealcursor", vim.wo[win_a].concealcursor, "")
 
+  -- Render again before switching buffers, so the BufLeave half has
+  -- something to hand back rather than passing on the WinLeave result.
   vim.api.nvim_set_current_win(win_a)
+  plugin.refresh_auto({ bufnr = buf_a, winid = win_a, force = true })
+  h.assert_eq("re-rendering raises conceallevel again", vim.wo[win_a].conceallevel, 2)
   vim.api.nvim_win_set_buf(win_a, buf_b)
-  h.assert_true("BufLeave restores wrap", vim.wo[win_a].wrap)
+  h.assert_false("BufLeave releases the rendering", inline.is_active(buf_a))
   h.assert_eq("BufLeave restores conceallevel", vim.wo[win_a].conceallevel, 0)
-  h.assert_eq("BufLeave restores concealcursor", vim.wo[win_a].concealcursor, "")
 
   inline.dispose(buf_a)
   if vim.api.nvim_win_is_valid(win_b) then
@@ -206,9 +193,6 @@ h.test("a window that newly shows a rendered buffer picks up its options", funct
     auto_preview = false,
     preview_mode = "inline",
     render_all = true,
-    -- Opt in: 'wrap' and 'concealcursor' are left alone by default.
-    inline_disable_wrap = true,
-    inline_wrap_scope = "always",
     debounce_ms = 0,
   })
 
@@ -220,23 +204,20 @@ h.test("a window that newly shows a rendered buffer picks up its options", funct
   local buf_b = new_markdown_buffer({ "plain text" })
   vim.api.nvim_win_set_buf(win_b, buf_b)
 
+  vim.wo[win_a].conceallevel = 0
   vim.api.nvim_set_current_win(win_a)
   plugin.refresh_auto({ bufnr = buf_a, winid = win_a, force = true })
-  h.assert_false("the rendering applies to the window it was made in", vim.wo[win_a].wrap)
+  h.assert_eq("the rendering applies to the window it was made in", vim.wo[win_a].conceallevel, 2)
 
   -- A second window that had none of the inline options now shows the
   -- rendered buffer: displaying it there has to apply them too. This is the
   -- BufWinEnter half of the attach autocommand; the WinEnter half is covered
   -- by the focus-change test below.
   vim.api.nvim_set_current_win(win_b)
-  vim.wo[win_b].wrap = true
   vim.wo[win_b].conceallevel = 0
-  vim.wo[win_b].concealcursor = ""
   vim.api.nvim_win_set_buf(win_b, buf_a)
 
-  h.assert_false("BufWinEnter reapplies inline wrap", vim.wo[win_b].wrap)
   h.assert_eq("BufWinEnter reapplies inline conceallevel", vim.wo[win_b].conceallevel, 2)
-  h.assert_eq("BufWinEnter reapplies inline concealcursor", vim.wo[win_b].concealcursor, "nvc")
 
   inline.dispose(buf_a)
   if vim.api.nvim_win_is_valid(win_b) then
@@ -254,9 +235,6 @@ h.test("focusing a window back onto its rendering reapplies its options", functi
     auto_preview = false,
     preview_mode = "inline",
     render_all = true,
-    -- Opt in: 'wrap' and 'concealcursor' are left alone by default.
-    inline_disable_wrap = true,
-    inline_wrap_scope = "always",
     debounce_ms = 0,
   })
 
@@ -276,21 +254,47 @@ h.test("focusing a window back onto its rendering reapplies its options", functi
 
   -- Something else took the options off the unfocused window: a :set, an
   -- ftplugin, another plugin. Focusing it has to put them back.
-  vim.wo[win_b].wrap = true
   vim.wo[win_b].conceallevel = 0
-  vim.wo[win_b].concealcursor = ""
 
   vim.api.nvim_set_current_win(win_b)
   h.assert_eq("focus alone did not change the displayed buffer", vim.api.nvim_win_get_buf(win_b), buf_a)
-  h.assert_false("WinEnter reapplies inline wrap", vim.wo[win_b].wrap)
   h.assert_eq("WinEnter reapplies inline conceallevel", vim.wo[win_b].conceallevel, 2)
-  h.assert_eq("WinEnter reapplies inline concealcursor", vim.wo[win_b].concealcursor, "nvc")
 
   inline.dispose(buf_a)
   if vim.api.nvim_win_is_valid(win_b) then
     vim.api.nvim_win_close(win_b, true)
   end
   delete_buffer(buf_a)
+end)
+
+h.test("a cursor move puts back a conceallevel taken off the rendered window", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  -- Under render_all a cursor move schedules no refresh, so the CursorMoved
+  -- handler itself is what repairs the window.
+  plugin.setup({
+    auto_preview = false,
+    preview_mode = "inline",
+    render_all = true,
+    debounce_ms = 0,
+  })
+
+  h.with_buffer(table_lines, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.wo.conceallevel = 0
+    plugin.refresh_auto({ force = true })
+    h.assert_true("the table is rendered", inline.is_active(buf))
+    h.assert_eq("rendering raises conceallevel", vim.wo.conceallevel, 2)
+
+    vim.wo.conceallevel = 0
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.api.nvim_exec_autocmds("CursorMoved", { buffer = buf })
+    h.assert_eq("CursorMoved reapplies conceallevel", vim.wo.conceallevel, 2)
+
+    inline.clear(buf)
+    h.assert_eq("clearing hands back the original conceallevel", vim.wo.conceallevel, 0)
+  end)
 end)
 
 h.test("a window that keeps its rendering on leave keeps its options", function()
@@ -361,7 +365,6 @@ h.test("BufWipeout disposes all per-buffer runtime state", function()
   local buf = new_markdown_buffer(table_lines)
   vim.api.nvim_set_current_buf(buf)
   plugin.toggle_inline()
-  plugin.toggle_inline_viewport_scrolling()
   plugin.state.paused_buffers[buf] = true
   plugin.schedule_refresh({ bufnr = buf, winid = vim.api.nvim_get_current_win(), force = true })
   -- Without these the cleanup assertions below would pass on state that was
@@ -375,7 +378,6 @@ h.test("BufWipeout disposes all per-buffer runtime state", function()
   for _, field in ipairs({
     "auto_buffers",
     "buffer_modes",
-    "inline_viewports",
     "refresh_tokens",
     "paused_buffers",
     "last_signature",
@@ -390,51 +392,25 @@ h.test("BufWipeout disposes all per-buffer runtime state", function()
   h.assert_true("wiped buffer is no longer the active inline buffer", plugin.state.inline_buf ~= buf)
 end)
 
-h.test("repeated setup resets inline viewport offsets", function()
+h.test("repeated setup disposes the inline renderings of the previous setup", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
-  local opts = {
-    auto_preview = false,
-    preview_mode = "inline",
-    render_all = true,
-    inline_viewport_scrolling = true,
-    min_col_width = 4,
-    max_col_width = 6,
-  }
+  plugin.setup({ auto_preview = false, preview_mode = "inline", render_all = true })
 
-  local function first_overlay(buf)
-    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })) do
-      local chunks = (mark[4] or {}).virt_text
-      if mark[2] == 0 and chunks then
-        local text_parts = {}
-        for _, chunk in ipairs(chunks) do
-          table.insert(text_parts, chunk[1])
-        end
-        return table.concat(text_parts)
-      end
-    end
-    return nil
-  end
-
-  plugin.setup(opts)
-  h.with_buffer({
-    "| a header that wraps | B |",
-    "| --- | --- |",
-    "| a body value that wraps | other |",
-  }, function(buf)
+  h.with_buffer(table_lines, function(buf)
     vim.bo[buf].filetype = "markdown"
-    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    vim.wo.conceallevel = 1
     plugin.refresh_auto({ force = true })
-    local initial = first_overlay(buf)
+    h.assert_true("the table is rendered before setup", inline.is_active(buf))
+    h.assert_eq("rendering raises conceallevel", vim.wo.conceallevel, 2)
 
-    h.assert_true("long table viewport can scroll", inline.scroll(buf, 1))
-    local scrolled = first_overlay(buf)
-    h.assert_true("viewport moves away from its initial row", scrolled ~= initial)
-
-    plugin.setup(opts)
-    plugin.refresh_auto({ force = true })
-    h.assert_eq("setup starts viewport at the top again", first_overlay(buf), initial)
-    inline.dispose(buf)
+    plugin.setup({ auto_preview = false })
+    h.assert_eq(
+      "no inline extmarks are left after setup",
+      #vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, {}),
+      0
+    )
+    h.assert_eq("setup hands back the conceallevel from before the rendering", vim.wo.conceallevel, 1)
   end)
 end)
 

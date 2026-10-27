@@ -11,14 +11,9 @@
 :MarkdownTablePrevRow	markdown-table-wrap.txt	/*:MarkdownTablePrevRow*
 :MarkdownTablePreview	markdown-table-wrap.txt	/*:MarkdownTablePreview*
 :MarkdownTableRefresh	markdown-table-wrap.txt	/*:MarkdownTableRefresh*
-:MarkdownTableScrollBottom	markdown-table-wrap.txt	/*:MarkdownTableScrollBottom*
-:MarkdownTableScrollDown	markdown-table-wrap.txt	/*:MarkdownTableScrollDown*
-:MarkdownTableScrollTop	markdown-table-wrap.txt	/*:MarkdownTableScrollTop*
-:MarkdownTableScrollUp	markdown-table-wrap.txt	/*:MarkdownTableScrollUp*
 :MarkdownTableStatus	markdown-table-wrap.txt	/*:MarkdownTableStatus*
 :MarkdownTableToggleAutoPreview	markdown-table-wrap.txt	/*:MarkdownTableToggleAutoPreview*
 :MarkdownTableToggleInline	markdown-table-wrap.txt	/*:MarkdownTableToggleInline*
-:MarkdownTableToggleInlineViewport	markdown-table-wrap.txt	/*:MarkdownTableToggleInlineViewport*
 :MarkdownTableTogglePreview	markdown-table-wrap.txt	/*:MarkdownTableTogglePreview*
 markdown-table-wrap-api	markdown-table-wrap.txt	/*markdown-table-wrap-api*
 markdown-table-wrap-commands	markdown-table-wrap.txt	/*markdown-table-wrap-commands*
@@ -26,8 +21,6 @@ markdown-table-wrap-configuration	markdown-table-wrap.txt	/*markdown-table-wrap-
 markdown-table-wrap-contents	markdown-table-wrap.txt	/*markdown-table-wrap-contents*
 markdown-table-wrap-highlight-preset	markdown-table-wrap.txt	/*markdown-table-wrap-highlight-preset*
 markdown-table-wrap-highlights	markdown-table-wrap.txt	/*markdown-table-wrap-highlights*
-markdown-table-wrap-inline-disable-wrap	markdown-table-wrap.txt	/*markdown-table-wrap-inline-disable-wrap*
-markdown-table-wrap-inline-viewport-scrolling	markdown-table-wrap.txt	/*markdown-table-wrap-inline-viewport-scrolling*
 markdown-table-wrap-installation	markdown-table-wrap.txt	/*markdown-table-wrap-installation*
 markdown-table-wrap-limitations	markdown-table-wrap.txt	/*markdown-table-wrap-limitations*
 markdown-table-wrap-map-gx	markdown-table-wrap.txt	/*markdown-table-wrap-map-gx*

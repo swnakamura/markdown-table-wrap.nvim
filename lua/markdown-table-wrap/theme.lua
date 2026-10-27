@@ -20,7 +20,6 @@ local presets = {
     callout_hint = { link = "DiagnosticHint" },
     callout_warn = { link = "DiagnosticWarn" },
     callout_error = { link = "DiagnosticError" },
-    blank = { link = "Normal" },
   },
   catppuccin = {
     border = { fg = "#89b4fa" },
@@ -41,7 +40,6 @@ local presets = {
     callout_hint = { link = "DiagnosticHint" },
     callout_warn = { link = "DiagnosticWarn" },
     callout_error = { link = "DiagnosticError" },
-    blank = { link = "Normal" },
   },
   default = {
     border = { link = "FloatBorder" },
@@ -62,7 +60,6 @@ local presets = {
     callout_hint = { link = "DiagnosticHint" },
     callout_warn = { link = "DiagnosticWarn" },
     callout_error = { link = "DiagnosticError" },
-    blank = { link = "Normal" },
   },
   render_markdown = {
     border = { link = "RenderMarkdownTableRow" },
@@ -83,7 +80,6 @@ local presets = {
     callout_hint = { link = "RenderMarkdownHint" },
     callout_warn = { link = "RenderMarkdownWarn" },
     callout_error = { link = "RenderMarkdownError" },
-    blank = { link = "Normal" },
   },
 }
 
@@ -106,7 +102,6 @@ local groups = {
   callout_hint = "MarkdownTableWrapCalloutHint",
   callout_warn = "MarkdownTableWrapCalloutWarn",
   callout_error = "MarkdownTableWrapCalloutError",
-  blank = "MarkdownTableWrapBlank",
 }
 
 -- A linked highlight can carry a background from the user's colorscheme. That
@@ -124,7 +119,6 @@ local transparent_content = {
   strike = true,
   wiki_link = true,
   image = true,
-  blank = true,
 }
 
 local function detect_preset()

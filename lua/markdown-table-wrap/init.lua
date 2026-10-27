@@ -25,25 +25,12 @@ local defaults = {
   clear_on_cursor_leave = true,
   clear_on_insert = false,
   -- Clear in visual mode so the selection is visible on raw source lines
-  -- (hidden/overlaid rows cannot show the selection highlight). The clear
-  -- keeps window options so conceal appearance doesn't flicker buffer-wide.
+  -- (rows hidden behind virtual lines cannot show the selection highlight).
+  -- The clear keeps window options so conceal appearance doesn't flicker
+  -- buffer-wide.
   clear_on_visual = true,
   debounce_ms = 80,
   overlay_priority = 10000,
-  overlay_fill = true,
-  inline_virtual_text = "overlay",
-  -- Keep 'wrap' untouched so the revealed cursor row soft-wraps at the
-  -- window width like any other line. Concealed rows collapse to one screen
-  -- line, and overlays are window-fixed, so rendering doesn't need nowrap.
-  -- Set this to true to get the hard-replace behaviour instead: 'wrap' is
-  -- cleared while inline replace mode is active (and 'concealcursor' is set,
-  -- so the cursor row is concealed too and no raw row is revealed).
-  inline_disable_wrap = false,
-  -- Only consulted when inline_disable_wrap is true: "always" clears 'wrap'
-  -- while any table is rendered, "cursor" only while the cursor sits inside
-  -- one, "never" leaves it alone.
-  inline_wrap_scope = "cursor",
-  inline_viewport_scrolling = false,
   -- Draw the window's line numbers into the rendered rows (virtual lines
   -- cannot receive native line numbers). Follows 'number' and
   -- 'relativenumber'; relative numbers track the cursor row.
@@ -89,7 +76,6 @@ M.state = {
   paused_buffers = {},
   auto_buffers = {},
   buffer_modes = {},
-  inline_viewports = {},
   gx_fallbacks = {},
   gx_installed = {},
   gx_callbacks = {},
@@ -136,19 +122,10 @@ local function auto_preview_for(bufnr)
   return M.config.auto_preview
 end
 
-local function inline_viewport_for(bufnr)
-  local override = M.state.inline_viewports[bufnr]
-  if override ~= nil then
-    return override
-  end
-  return M.config.inline_viewport_scrolling
-end
-
 local function config_for_buffer(bufnr)
   local config = vim.deepcopy(M.config)
   config.preview_mode = preview_mode_for(bufnr)
   config.auto_preview = auto_preview_for(bufnr)
-  config.inline_viewport_scrolling = inline_viewport_for(bufnr)
   return config
 end
 
@@ -170,18 +147,11 @@ local function validate_config()
   M.config.overlay_priority = math.max(1, tonumber(M.config.overlay_priority) or defaults.overlay_priority)
   M.config.max_width_ratio = math.max(0.1, math.min(1, M.config.max_width_ratio))
   M.config.render_all = M.config.render_all ~= false
-  M.config.overlay_fill = M.config.overlay_fill ~= false
   M.config.fit_to_window = M.config.fit_to_window ~= false
   M.config.clear_on_visual = M.config.clear_on_visual ~= false
-  M.config.inline_disable_wrap = M.config.inline_disable_wrap ~= false
-  M.config.inline_viewport_scrolling = M.config.inline_viewport_scrolling ~= false
   M.config.inline_line_numbers = M.config.inline_line_numbers ~= false
   M.config.inline_stable_height = M.config.inline_stable_height ~= false
   M.config.map_gx = M.config.map_gx == true
-
-  if not vim.tbl_contains({ "always", "cursor", "never" }, M.config.inline_wrap_scope) then
-    M.config.inline_wrap_scope = defaults.inline_wrap_scope
-  end
 
   if type(M.config.extra_filetypes) ~= "table" or #M.config.extra_filetypes == 0 then
     M.config.extra_filetypes = {}
@@ -222,10 +192,6 @@ local function validate_config()
 
   if M.config.quote_icon ~= false and type(M.config.quote_icon) ~= "string" then
     M.config.quote_icon = defaults.quote_icon
-  end
-
-  if M.config.inline_virtual_text ~= "overlay" and M.config.inline_virtual_text ~= "win_col" then
-    M.config.inline_virtual_text = defaults.inline_virtual_text
   end
 
   if M.config.preview_mode ~= "inline" and M.config.preview_mode ~= "float" then
@@ -389,10 +355,6 @@ local function table_signature(bufnr, table_info, config)
     tostring(config.row_separator),
     tostring(config.inline_mode),
     tostring(config.clear_on_visual),
-    tostring(config.inline_virtual_text),
-    tostring(config.inline_disable_wrap),
-    tostring(config.inline_wrap_scope),
-    tostring(config.inline_viewport_scrolling),
     tostring(config.inline_line_numbers),
     tostring(config.inline_stable_height),
     tostring(config.quote_icon),
@@ -413,11 +375,6 @@ local function all_tables_signature(bufnr, tables, config)
     tostring(config.row_separator),
     tostring(config.inline_mode),
     tostring(config.clear_on_visual),
-    tostring(config.inline_virtual_text),
-    tostring(config.inline_disable_wrap),
-    tostring(config.inline_wrap_scope),
-    tostring(config.overlay_fill),
-    tostring(config.inline_viewport_scrolling),
     tostring(config.inline_line_numbers),
     tostring(config.inline_stable_height),
     tostring(config.quote_icon),
@@ -707,42 +664,6 @@ function M.toggle_auto_preview()
   end
 end
 
-function M.toggle_inline_viewport_scrolling()
-  local bufnr = vim.api.nvim_get_current_buf()
-  M.state.inline_viewports[bufnr] = not inline_viewport_for(bufnr)
-  require("markdown-table-wrap.inline").reset_view(bufnr)
-  M.state.last_signature[bufnr] = nil
-  M.refresh_auto({ force = true })
-  vim.notify(
-    string.format(
-      "MarkdownTableWrap: inline viewport scrolling %s",
-      inline_viewport_for(bufnr) and "enabled" or "disabled"
-    ),
-    vim.log.levels.INFO
-  )
-end
-
-function M.scroll_view(delta)
-  if require("markdown-table-wrap.inline").scroll(vim.api.nvim_get_current_buf(), delta) then
-    return
-  end
-
-  local keys = delta > 0 and [[\<C-E>]] or [[\<C-Y>]]
-  vim.cmd("normal! " .. tostring(math.max(1, math.abs(delta))) .. keys)
-end
-
-function M.scroll_view_to(position)
-  if require("markdown-table-wrap.inline").scroll_to(vim.api.nvim_get_current_buf(), position) then
-    return
-  end
-
-  if position == "bottom" then
-    vim.cmd("normal! G")
-  else
-    vim.cmd("normal! gg")
-  end
-end
-
 local function create_autocmds()
   if M.state.augroup then
     vim.api.nvim_del_augroup_by_id(M.state.augroup)
@@ -757,7 +678,7 @@ local function create_autocmds()
         return
       end
 
-      require("markdown-table-wrap.inline").update_wrap_for_cursor(args.buf)
+      require("markdown-table-wrap.inline").attach_window(args.buf)
       -- Reveal the raw source line under the cursor, restore the row left
       require("markdown-table-wrap.inline").update_reveal(args.buf)
 
@@ -892,7 +813,6 @@ local function create_autocmds()
       M.state.paused_buffers[args.buf] = nil
       M.state.auto_buffers[args.buf] = nil
       M.state.buffer_modes[args.buf] = nil
-      M.state.inline_viewports[args.buf] = nil
       M.state.gx_fallbacks[args.buf] = nil
       M.state.gx_installed[args.buf] = nil
       M.state.gx_callbacks[args.buf] = nil
@@ -928,6 +848,13 @@ local function create_autocmds()
 end
 
 function M.setup(opts)
+  -- Rendering hides the source rows with conceal_lines, an extmark key older
+  -- Neovim rejects; rather than failing on every refresh, nothing is set up.
+  if vim.fn.has("nvim-0.11") ~= 1 then
+    vim.notify("MarkdownTableWrap: Neovim 0.11 or newer is required; the plugin is not set up.", vim.log.levels.ERROR)
+    return
+  end
+
   if M.state.did_setup then
     close_existing()
     local inline = require("markdown-table-wrap.inline")
@@ -945,7 +872,6 @@ function M.setup(opts)
   M.state.paused_buffers = {}
   M.state.auto_buffers = {}
   M.state.buffer_modes = {}
-  M.state.inline_viewports = {}
   M.state.last_signature = {}
   M.state.visual_buffers = {}
   M.state.inline_buf = nil
@@ -1004,21 +930,16 @@ function M.setup(opts)
     local config = config_for_buffer(bufnr)
     vim.notify(
       string.format(
-        "MarkdownTableWrap: auto=%s paused=%s active=%s mode=%s/%s wrap=%s",
+        "MarkdownTableWrap: auto=%s paused=%s active=%s mode=%s/%s",
         tostring(config.auto_preview),
         tostring(paused),
         tostring(active),
         config.preview_mode,
-        config.inline_mode .. (config.inline_viewport_scrolling and "/viewport" or "/full"),
-        config.inline_wrap_scope
+        config.inline_mode
       ),
       vim.log.levels.INFO
     )
   end, { desc = "Show Markdown table wrap status", force = true })
-
-  vim.api.nvim_create_user_command("MarkdownTableToggleInlineViewport", function()
-    M.toggle_inline_viewport_scrolling()
-  end, { desc = "Toggle inline viewport scrolling for long rendered tables", force = true })
 
   vim.api.nvim_create_user_command("MarkdownTableNextCell", function()
     require("markdown-table-wrap.nav").move_horizontal(1)
@@ -1052,24 +973,6 @@ function M.setup(opts)
     end,
     force = true,
   })
-
-  vim.api.nvim_create_user_command("MarkdownTableScrollDown", function(opts_cmd)
-    local count = tonumber(opts_cmd.count) or 1
-    M.scroll_view(count > 0 and count or 1)
-  end, { desc = "Scroll rendered Markdown table view down", count = true, force = true })
-
-  vim.api.nvim_create_user_command("MarkdownTableScrollUp", function(opts_cmd)
-    local count = tonumber(opts_cmd.count) or 1
-    M.scroll_view(-(count > 0 and count or 1))
-  end, { desc = "Scroll rendered Markdown table view up", count = true, force = true })
-
-  vim.api.nvim_create_user_command("MarkdownTableScrollTop", function()
-    M.scroll_view_to("top")
-  end, { desc = "Scroll rendered Markdown table view to the top", force = true })
-
-  vim.api.nvim_create_user_command("MarkdownTableScrollBottom", function()
-    M.scroll_view_to("bottom")
-  end, { desc = "Scroll rendered Markdown table view to the bottom", force = true })
 
   if auto_preview_for(vim.api.nvim_get_current_buf()) and is_markdown_buffer() then
     M.schedule_refresh({

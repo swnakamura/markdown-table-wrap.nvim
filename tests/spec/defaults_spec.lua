@@ -149,6 +149,56 @@ h.test("default setup renders the table in place with row-anchored blocks", func
   end)
 end)
 
+h.test("default setup re-renders a refreshed table in place of the old rendering", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  plugin.setup({})
+
+  -- Every extmark of the plugin namespace with its details, ids left out: a
+  -- re-render legitimately allocates new ids.
+  local function snapshot(bufnr)
+    local result = {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, inline.namespace(), 0, -1, { details = true })) do
+      local details = mark[4] or {}
+      details.ns_id = nil
+      table.insert(result, { mark[2], mark[3], details })
+    end
+    return result
+  end
+
+  h.with_buffer(table_lines, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    plugin.refresh_auto()
+    local before = snapshot(buf)
+    local concealed, blocks = marks(buf)
+    h.assert_true("the table is rendered", #blocks > 0 and concealed[3] == true)
+
+    vim.cmd("MarkdownTableRefresh")
+    h.assert_deep_eq("a forced refresh leaves the same extmarks", snapshot(buf), before)
+
+    -- A width change re-renders through the debounced resize path (the
+    -- render signature carries the window width). This table is narrow
+    -- enough to render identically at both widths.
+    local columns = vim.o.columns
+    local signature = plugin.state.last_signature[buf]
+    vim.o.columns = columns - 20
+    vim.api.nvim_exec_autocmds("VimResized", {})
+    h.assert_true(
+      "the resize re-renders the table",
+      vim.wait(1000, function()
+        return plugin.state.last_signature[buf] ~= signature
+      end, 10)
+    )
+    h.assert_deep_eq("a resize-triggered re-render leaves the same extmarks", snapshot(buf), before)
+
+    vim.o.columns = columns
+    inline.clear(buf)
+    plugin.state.inline_buf = nil
+  end)
+end)
+
 h.test("default setup reveals the source row under the cursor and follows it", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
@@ -477,7 +527,6 @@ h.test("default setup leaves 'wrap' and 'concealcursor' alone", function()
   local inline = require("markdown-table-wrap.inline")
 
   plugin.setup({})
-  h.assert_false("wrap is not disabled by default", plugin.config.inline_disable_wrap)
 
   h.with_buffer(table_lines, function(buf)
     vim.bo[buf].filetype = "markdown"

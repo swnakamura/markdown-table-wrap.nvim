@@ -24,16 +24,24 @@ local function warn(message)
   end
 end
 
+local function health_error(message)
+  if vim.health and vim.health.error then
+    vim.health.error(message)
+  else
+    vim.health.report_error(message)
+  end
+end
+
 function M.check()
   start("markdown-table-wrap.nvim")
 
   local plugin = require("markdown-table-wrap")
   ok("Version " .. (plugin.version or "unknown"))
 
-  if vim.fn.has("nvim-0.10") == 1 then
-    ok("Neovim >= 0.10")
+  if vim.fn.has("nvim-0.11") == 1 then
+    ok("Neovim >= 0.11")
   else
-    warn("Neovim 0.10+ is required")
+    health_error("Neovim 0.11+ is required")
   end
 
   local modules = {

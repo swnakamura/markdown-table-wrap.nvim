@@ -409,3 +409,45 @@ h.test("generated tables render every line at one display width", function()
     end
   end)
 end)
+
+h.test("render emits one row group per source line", function()
+  local parser = require("markdown-table-wrap.parser")
+  local render = require("markdown-table-wrap.render")
+  local config = {
+    max_width_ratio = 0.9,
+    min_col_width = 4,
+    max_col_width = 8,
+    use_unicode_border = true,
+    table_border = "rounded",
+    row_separator = true,
+  }
+
+  for _, case in ipairs({
+    {
+      name = "plain table",
+      lines = { "| A | B |", "| --- | --- |", "| alpha beta gamma delta | one |", "| two | three |" },
+    },
+    {
+      name = "blockquote table",
+      lines = { "> | A | B |", "> | --- | --- |", "> | one | two |", "> | three | four |" },
+    },
+    {
+      name = "table with a short row",
+      lines = { "| A | B | C |", "| --- | --- | --- |", "| one |", "| two | three | four |" },
+    },
+    {
+      name = "table with an excess cell",
+      lines = { "| A | B |", "| --- | --- |", "| one | two | three |", "| four | five |" },
+    },
+  }) do
+    h.with_buffer(case.lines, function(buf)
+      local parsed = parser.parse_at_cursor(buf, 1)
+      h.assert_true(case.name .. " parses", parsed ~= nil)
+      local source_count = parsed.end_lnum - parsed.start_lnum + 1
+      h.assert_eq(case.name .. " spans every buffer line", source_count, #case.lines)
+
+      local rendered = render.render_table(parsed, config)
+      h.assert_eq(case.name .. " has one row group per source line", #rendered.groups, source_count)
+    end)
+  end
+end)

@@ -11,7 +11,7 @@ rename its development branch as part of a release.
 - Development/release branch: `master`
 - Latest published tag before this release: `v0.2.2`
 - Next planned release: `v0.2.3`
-- Supported Neovim baseline: 0.10+
+- Supported Neovim baseline: 0.11+
 
 Verify these values rather than assuming the local checkout is current:
 
@@ -89,7 +89,7 @@ nvim --headless -u NONE --cmd "set shadafile=NONE" --cmd "set noswapfile" \
 
 The GitHub Actions workflow repeats formatting and the headless suite on:
 
-- Neovim 0.10.4
+- Neovim 0.11.0
 - Neovim stable
 
 Also run whitespace and documentation checks:
@@ -122,7 +122,7 @@ several tables, links, escaped pipes, code spans, and mixed CJK/English text.
 - Trigger edits/refreshes in two buffers in quick succession and confirm each
   buffer refreshes itself rather than cancelling or rendering the other.
 - Wipe a rendered buffer and confirm reopening a document does not inherit stale
-  viewport, timer, or view state.
+  timer or view state.
 
 ### Mappings And Links
 
@@ -135,17 +135,14 @@ several tables, links, escaped pipes, code spans, and mixed CJK/English text.
 ### Inline And Float
 
 - Confirm `:MarkdownTableToggleInline` has the documented transitions.
-- Confirm Inline restores window-local `wrap`, `conceallevel`, and
-  `concealcursor` when leaving the buffer or clearing the view.
-- Confirm full Inline and viewport-sliced Inline scrolling/top/bottom commands.
+- Confirm Inline restores window-local `conceallevel` when leaving the buffer or
+  clearing the view, and never changes `wrap` or `concealcursor`.
 - Confirm linked semantic content highlights do not fill every Inline cell when
   their source group has a background; verify an explicit `bg` still opts in.
 - Confirm code-wrapped link and image labels keep Inline separators aligned,
   including labels containing CJK text and multiple backticks.
 - Confirm wrapped header continuation rows retain the Header highlight in both
   Inline replace and insert modes.
-- Scroll an Inline viewport, call `setup()` again, and confirm the stale viewport
-  offset is not retained.
 - Call `setup()` again and confirm a delayed pre-setup refresh cannot overwrite
   the new configuration.
 - Confirm Float opens, scrolls, follows link metadata, and closes with `q`.
@@ -226,8 +223,6 @@ the two intentional default changes prominently:
 The real media currently tracked in this repository are:
 
 - `docs/01-inline-tokyonight.png`
-- `docs/02-inline-scroll.gif`
-- `docs/02b-inline-full-toggle.png`
 - `docs/03-floating-long-table.png`
 
 Use only those files unless new media is committed and reviewed first. The

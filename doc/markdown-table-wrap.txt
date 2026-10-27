@@ -30,22 +30,13 @@ keeping a rendered table layer visible.
 |:MarkdownTableToggleInline| switches between Source and Inline. Press it
 again to clear Inline and leave Source visible.
 
-When optional inline mode is selected, complete-table rendering remains the
-default and viewport slicing remains disabled.
-
-If you enable |markdown-table-wrap-inline-viewport-scrolling|, the plugin
-instead keeps inline rendering inside the original source table height and
-lets you move through the rendered slice with |:MarkdownTableScrollDown|,
-|:MarkdownTableScrollUp|,
-|:MarkdownTableScrollTop|, and |:MarkdownTableScrollBottom|.
-
 The plugin is designed to coexist with render-markdown.nvim by letting
 render-markdown.nvim handle non-table Markdown while markdown-table-wrap.nvim
 owns pipe table rendering.
 
 Requirements:
 
-- Neovim 0.10+
+- Neovim 0.11+
 - No external binary dependencies
 
 ==============================================================================
@@ -135,10 +126,6 @@ COMMANDS                                      *markdown-table-wrap-commands*
 :MarkdownTableStatus
     Show the current rendering state.
 
-                                           *:MarkdownTableToggleInlineViewport*
-:MarkdownTableToggleInlineViewport
-    Toggle between viewport-sliced inline rendering and full inline rendering.
-
                                                        *:MarkdownTableNextCell*
 :MarkdownTableNextCell
     Move to the next source table cell.
@@ -174,22 +161,6 @@ COMMANDS                                      *markdown-table-wrap-commands*
     formulas; this includes negative numbers. A table whose body rows hold
     more cells than its header is refused, and no register is changed.
 
-                                                     *:MarkdownTableScrollDown*
-:MarkdownTableScrollDown
-    Scroll the rendered table view down.
-
-                                                       *:MarkdownTableScrollUp*
-:MarkdownTableScrollUp
-    Scroll the rendered table view up.
-
-                                                      *:MarkdownTableScrollTop*
-:MarkdownTableScrollTop
-    Jump the rendered table viewport to the top.
-
-                                                   *:MarkdownTableScrollBottom*
-:MarkdownTableScrollBottom
-    Jump the rendered table viewport to the bottom.
-
 ==============================================================================
 CONFIGURATION                              *markdown-table-wrap-configuration*
 
@@ -216,11 +187,6 @@ Default setup:
     clear_on_visual = true,
     debounce_ms = 80,
     overlay_priority = 10000,
-    overlay_fill = true,
-    inline_virtual_text = "overlay",
-    inline_disable_wrap = false,
-    inline_wrap_scope = "cursor",
-    inline_viewport_scrolling = false,
     quote_icon = "auto",
     highlight_preset = "default",
     theme_dir = nil,
@@ -272,41 +238,9 @@ preview_mode~
     under the cursor.
 
 inline_mode~
-    "replace" hides source text and overlays rendered rows.
+    "replace" hides the source rows and draws the rendered rows in their
+    place.
     "insert" shows rendered rows above or below the source table.
-
-inline_virtual_text~
-    "overlay" or "win_col" for the replace-mode virtual text strategy.
-    "overlay" is the default and is generally the most portable choice.
-
-inline_disable_wrap~
-                                *markdown-table-wrap-inline-disable-wrap*
-    Enables the temporary nowrap protection for inline replace mode. Long
-    concealed source rows can otherwise soft-wrap underneath the rendered
-    table on some terminal and platform combinations.
-
-    Default false. On Neovim 0.11 or newer the source rows are removed from
-    the screen with "conceal_lines" instead of merely concealed, so they
-    cannot soft-wrap, and 'wrap' must stay on for the raw source row revealed
-    under the cursor to soft-wrap like any other line.
-
-    Setting this to true opts into the hard-replace behaviour: 'wrap' is
-    cleared and 'concealcursor' is set, so no raw row is revealed under the
-    cursor.
-
-inline_wrap_scope~
-    Controls where |markdown-table-wrap-inline-disable-wrap| applies. Only
-    consulted when that option is true.
-
-    "always" disables wrap for the whole window while inline tables are
-       active. This is the strictest and most stable setting.
-
-    "cursor" (the default) disables wrap only while the cursor is inside a
-    rendered table, then restores the previous window-local wrap setting so
-    ordinary Markdown paragraphs continue to wrap normally.
-
-    "never" leaves wrap fully under user control. This may allow concealed
-    source rows to leak or flicker on long tables.
 
 clear_on_visual~
     In inline mode, reveal source Markdown while selecting text and re-render
@@ -341,16 +275,6 @@ themes~                                    *markdown-table-wrap-themes*
     Inline custom theme table keyed by |markdown-table-wrap-highlight-preset|.
     For example, set highlight_preset = "my_theme" and provide
     themes.my_theme.
-
-inline_viewport_scrolling~
-                         *markdown-table-wrap-inline-viewport-scrolling*
-    When enabled, |:MarkdownTableScrollDown| and |:MarkdownTableScrollUp|
-    page through rendered rows inside the original table height.
-
-    When disabled, the complete rendered table is shown inline with extra
-    virtual lines. This is the default because it is less surprising on first
-    use. In that mode, scroll commands fall back to normal window scrolling
-    because the table is already expanded visually.
 
 link~
     Icon configuration for links, wiki links, images, and URL pattern matches.
@@ -393,8 +317,8 @@ The inspection helpers return effective per-buffer state without changing it.
 
 get_buffer_config({bufnr})~      *markdown-table-wrap.get_buffer_config()*
     Return a deep-copied effective configuration for {bufnr}, including
-    runtime view, auto-preview, and inline-viewport overrides. Omit {bufnr} or
-    pass 0 for the current buffer.
+    runtime view and auto-preview overrides. Omit {bufnr} or pass 0 for the
+    current buffer.
 
 get_preview_mode({bufnr})~          *markdown-table-wrap.get_preview_mode()*
     Return the effective "inline" or "float" mode for {bufnr} without
@@ -438,7 +362,6 @@ Highlight groups:
 - MarkdownTableWrapCalloutHint
 - MarkdownTableWrapCalloutWarn
 - MarkdownTableWrapCalloutError
-- MarkdownTableWrapBlank
 
 Semantic highlight groups are reapplied after ColorScheme. A direct custom
 spec replaces the preset's linked base for that semantic key.
@@ -447,7 +370,7 @@ Content highlight keys are background-transparent when they only link to an
 existing highlight group. This prevents Inline replace mode from drawing a
 filled rectangle for every cell when a colorscheme gives Normal, Title, or
 another linked group a background. Add an explicit `bg` to opt into a filled
-background; `blank` is only the padding highlight and can usually be `{}`.
+background.
 
 Inline-code delimiters inside link or image labels are removed from the
 display text before width calculation. This keeps concealed backticks from
@@ -491,15 +414,9 @@ links to its RenderMarkdown* groups.
 ==============================================================================
 LIMITATIONS                                *markdown-table-wrap-limitations*
 
-- Inline replacement uses virtual text and optional virtual lines. These are
-  visual rows, not real buffer rows. Use |:MarkdownTableScrollDown| /
-  |:MarkdownTableScrollUp| to page through the inline rendered slice, or use
-  |:MarkdownTableFloatPreview| for a normal scrollable preview buffer.
-- Terminal and platform combinations can differ in how wrap, conceal, and
-  virtual text interact. The default
-  |markdown-table-wrap-inline-disable-wrap| setting exists to prevent
-  concealed long source rows from leaking through below the rendered table on
-  some terminal setups.
+- Inline replacement draws the rendered rows as virtual lines. These are
+  visual rows, not real buffer rows; use |:MarkdownTableFloatPreview| for a
+  normal scrollable preview buffer.
 - Treesitter-aware table discovery is not implemented yet.
 - Container-prefixed tables nested inside lists are not implemented yet. Such
   container starts safely terminate a top-level table. Blockquoted tables are

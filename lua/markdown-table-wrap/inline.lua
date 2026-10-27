@@ -4,12 +4,8 @@ local M = {}
 
 local namespace = vim.api.nvim_create_namespace("markdown-table-wrap")
 local saved_conceallevels = {}
-local saved_concealcursors = {}
-local saved_wraps = {}
 local active_buffers = {}
-local active_tables = {}
 local active_configs = {}
-local view_offsets = {}
 -- Buffers currently rendered by the row-anchored replace mode (see the block
 -- comment above show_replace_aligned). Declared here because the window
 -- option handling below has to know about it.
@@ -153,24 +149,11 @@ local function quoted(chunks, quote)
   return chunks
 end
 
-local function padded_chunks(line_obj, line_index, target_width, quote)
-  local line = type(line_obj) == "table" and line_obj.text or line_obj
-  local chunks = quoted(chunks_from_line_object(line_obj, line_index), quote)
-  local missing = math.max(0, target_width - vim.api.nvim_strwidth(line) - (quote and quote.width or 0))
-
-  if missing > 0 then
-    append_chunk(chunks, string.rep(" ", missing), "MarkdownTableWrapBlank")
-  end
-
-  return chunks
-end
-
-local function virt_lines(lines, start_index, quote)
+local function virt_lines(lines, quote)
   local result = {}
-  start_index = start_index or 1
 
   for index, line in ipairs(lines) do
-    table.insert(result, quoted(chunks_from_line_object(line, start_index + index - 1), quote))
+    table.insert(result, quoted(chunks_from_line_object(line, index), quote))
   end
 
   return result
@@ -180,61 +163,7 @@ local function ensure_highlights(config)
   require("markdown-table-wrap.theme").apply(config)
 end
 
-local function cursor_in_tables(winid, tables)
-  if not vim.api.nvim_win_is_valid(winid) then
-    return false
-  end
-
-  local cursor_lnum = vim.api.nvim_win_get_cursor(winid)[1]
-  for _, table_info in ipairs(tables or {}) do
-    if cursor_lnum >= table_info.start_lnum and cursor_lnum <= table_info.end_lnum then
-      return true
-    end
-  end
-
-  return false
-end
-
-local function should_disable_wrap(config, in_table)
-  -- Off by default: row-anchored replace mode reveals the raw source line
-  -- under the cursor and measures its soft-wrapped height to keep the table
-  -- height constant, and clearing 'wrap' would truncate that revealed row.
-  -- Opting in is a deliberate request for the hard-replace behaviour, so it
-  -- is honoured as-is -- the reveal degrades to a truncated row.
-  if config.inline_mode ~= "replace" or config.inline_disable_wrap == false then
-    return false
-  end
-
-  if config.inline_wrap_scope == "never" then
-    return false
-  end
-
-  if config.inline_wrap_scope == "cursor" then
-    return in_table
-  end
-
-  return true
-end
-
-local function restore_saved_wrap(winid)
-  local previous_wrap = saved_wraps[winid]
-  if previous_wrap ~= nil and vim.api.nvim_win_is_valid(winid) then
-    if vim.wo[winid].wrap ~= previous_wrap then
-      vim.wo[winid].wrap = previous_wrap
-    end
-  end
-  saved_wraps[winid] = nil
-end
-
-local function restore_saved_concealcursor(winid)
-  local previous = saved_concealcursors[winid]
-  if previous ~= nil and vim.api.nvim_win_is_valid(winid) then
-    vim.wo[winid].concealcursor = previous
-  end
-  saved_concealcursors[winid] = nil
-end
-
-local function set_render_window(winid, config, in_table)
+local function set_render_window(winid)
   winid = winid or vim.api.nvim_get_current_win()
   if not vim.api.nvim_win_is_valid(winid) then
     return
@@ -248,34 +177,16 @@ local function set_render_window(winid, config, in_table)
     vim.wo[winid].conceallevel = 2
   end
 
-  -- 'concealcursor' follows the wrap decision, so by default it is left
-  -- untouched: the cursor line keeps unconcealing itself, which is exactly how
-  -- the revealed raw source row under the cursor works (and it keeps markdown
-  -- delimiters visible while editing instead of flickering on mode changes).
-  -- Once 'wrap' is turned off the rendering is a hard replace with no revealed
-  -- row, so the source under the cursor is concealed too.
-  if should_disable_wrap(config, in_table) then
-    if saved_concealcursors[winid] == nil then
-      saved_concealcursors[winid] = vim.wo[winid].concealcursor
-    end
-    vim.wo[winid].concealcursor = "nvc"
-
-    if saved_wraps[winid] == nil then
-      saved_wraps[winid] = vim.wo[winid].wrap
-    end
-    if vim.wo[winid].wrap then
-      vim.wo[winid].wrap = false
-    end
-  else
-    restore_saved_concealcursor(winid)
-    restore_saved_wrap(winid)
-  end
+  -- 'concealcursor' is left untouched: the cursor line keeps unconcealing
+  -- itself, which is exactly how the revealed raw source row under the cursor
+  -- works (and it keeps markdown delimiters visible while editing instead of
+  -- flickering on mode changes). 'wrap' is left untouched too: the revealed
+  -- row has to soft-wrap like any other line.
 end
 
-local function set_render_for_buffer(bufnr, config)
-  local tables = active_tables[bufnr] or {}
+local function set_render_for_buffer(bufnr)
   for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
-    set_render_window(winid, config, cursor_in_tables(winid, tables))
+    set_render_window(winid)
   end
 end
 
@@ -285,46 +196,12 @@ local function restore_render_window(winid)
     vim.wo[winid].conceallevel = previous
   end
   saved_conceallevels[winid] = nil
-
-  restore_saved_concealcursor(winid)
-  restore_saved_wrap(winid)
 end
 
 local function restore_render_for_buffer(bufnr)
   for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
     restore_render_window(winid)
   end
-end
-
-local function conceal_source_line(bufnr, row)
-  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
-  if line == "" then
-    return
-  end
-
-  vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
-    end_row = row,
-    end_col = #line,
-    conceal = "",
-    priority = 9999,
-  })
-end
-
-local function table_key(table_info)
-  return tostring(table_info.start_lnum) .. ":" .. tostring(table_info.end_lnum)
-end
-
-local function view_offset(bufnr, table_info, source_count, rendered_count, config)
-  if not config.inline_viewport_scrolling then
-    return 0
-  end
-
-  view_offsets[bufnr] = view_offsets[bufnr] or {}
-  local key = table_key(table_info)
-  local max_offset = math.max(0, rendered_count - source_count)
-  local offset = math.max(0, math.min(view_offsets[bufnr][key] or 0, max_offset))
-  view_offsets[bufnr][key] = offset
-  return offset
 end
 
 -- Row-anchored replace mode, built on conceal_lines (nvim 0.11+).
@@ -679,64 +556,22 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
   set_table_blocks(bufnr, entry, nil)
 end
 
-local has_conceal_lines = vim.fn.has("nvim-0.11") == 1
-
 local function show_replace(bufnr, table_info, config, rendered)
   local source_count = table_info.end_lnum - table_info.start_lnum + 1
-  if
-    has_conceal_lines
-    and rendered.groups
-    and #rendered.groups == source_count
-    and not config.inline_viewport_scrolling
-  then
-    return show_replace_aligned(bufnr, table_info, config, rendered)
+  if #rendered.groups ~= source_count then
+    error(
+      string.format(
+        "MarkdownTableWrap: table at lines %d-%d rendered %d row groups for %d source lines;"
+          .. " inline replace needs exactly one per source line",
+        table_info.start_lnum,
+        table_info.end_lnum,
+        #rendered.groups,
+        source_count
+      )
+    )
   end
 
-  local rendered_count = #rendered.lines
-  local first_rendered = view_offset(bufnr, table_info, source_count, rendered_count, config)
-  local overlay_count = math.min(source_count, rendered_count - first_rendered)
-  local start_row = table_info.start_lnum - 1
-  local overlay_width = rendered.width
-  if config.overlay_fill then
-    overlay_width = vim.api.nvim_win_get_width(0)
-  end
-  local priority = config.overlay_priority or 10000
-
-  for source_offset = 0, source_count - 1 do
-    conceal_source_line(bufnr, start_row + source_offset)
-  end
-
-  for source_offset = 0, overlay_count - 1 do
-    local line_obj = (rendered.line_objects or rendered.lines)[first_rendered + source_offset + 1]
-    local mark = {
-      virt_text = padded_chunks(line_obj, first_rendered + source_offset + 1, overlay_width, rendered.quote),
-      hl_mode = "replace",
-      right_gravity = false,
-      priority = priority,
-    }
-
-    if config.inline_virtual_text == "win_col" then
-      mark.virt_text_win_col = 0
-    else
-      mark.virt_text_pos = "overlay"
-    end
-
-    vim.api.nvim_buf_set_extmark(bufnr, namespace, start_row + source_offset, 0, mark)
-  end
-
-  if rendered_count > overlay_count and not config.inline_viewport_scrolling then
-    local extra = {}
-    for index = overlay_count + 1, rendered_count do
-      table.insert(extra, (rendered.line_objects or rendered.lines)[index])
-    end
-
-    vim.api.nvim_buf_set_extmark(bufnr, namespace, table_info.end_lnum - 1, 0, {
-      virt_lines = virt_lines(extra, overlay_count + 1, rendered.quote),
-      virt_lines_above = false,
-      right_gravity = false,
-      priority = priority,
-    })
-  end
+  return show_replace_aligned(bufnr, table_info, config, rendered)
 end
 
 local function show_insert(bufnr, table_info, config, rendered)
@@ -744,7 +579,7 @@ local function show_insert(bufnr, table_info, config, rendered)
   local above = config.inline_position ~= "below"
 
   vim.api.nvim_buf_set_extmark(bufnr, namespace, target_line, 0, {
-    virt_lines = virt_lines(rendered.line_objects or rendered.lines, 1, rendered.quote),
+    virt_lines = virt_lines(rendered.line_objects or rendered.lines, rendered.quote),
     virt_lines_above = above,
     right_gravity = false,
     priority = 200,
@@ -772,7 +607,6 @@ function M.clear(bufnr, opts)
   end
 
   active_buffers[bufnr] = nil
-  active_tables[bufnr] = nil
   active_configs[bufnr] = nil
   aligned_tables[bufnr] = nil
   if not opts.keep_window then
@@ -788,12 +622,6 @@ end
 function M.dispose(bufnr)
   bufnr = normalize_bufnr(bufnr)
   M.clear(bufnr)
-  view_offsets[bufnr] = nil
-end
-
-function M.reset_view(bufnr)
-  bufnr = normalize_bufnr(bufnr)
-  view_offsets[bufnr] = nil
 end
 
 function M.is_active(bufnr)
@@ -824,10 +652,9 @@ function M.show(bufnr, table_info, config)
 
   local rendered = show_one(bufnr, table_info, config)
   active_buffers[bufnr] = true
-  active_tables[bufnr] = { table_info }
   active_configs[bufnr] = config
   if config.inline_mode == "replace" then
-    set_render_for_buffer(bufnr, config)
+    set_render_for_buffer(bufnr)
   end
   M.update_reveal(bufnr)
   return rendered
@@ -843,102 +670,19 @@ function M.show_many(bufnr, tables, config)
   end
 
   active_buffers[bufnr] = #tables > 0
-  active_tables[bufnr] = tables
   active_configs[bufnr] = config
   if config.inline_mode == "replace" then
-    set_render_for_buffer(bufnr, config)
+    set_render_for_buffer(bufnr)
   end
   M.update_reveal(bufnr)
   return rendered
 end
 
-local function table_under_cursor(bufnr, tables)
-  local cursor_lnum = vim.api.nvim_win_get_cursor(0)[1]
-  for _, table_info in ipairs(tables) do
-    if cursor_lnum >= table_info.start_lnum and cursor_lnum <= table_info.end_lnum then
-      return table_info
-    end
-  end
-  return nil
-end
-
-local function max_view_offset(table_info, config)
-  local rendered = render.render_table(table_info, config)
-  local source_count = table_info.end_lnum - table_info.start_lnum + 1
-  return math.max(0, #rendered.lines - source_count)
-end
-
-function M.scroll(bufnr, delta)
-  bufnr = normalize_bufnr(bufnr)
-  local tables = active_tables[bufnr]
-  local config = active_configs[bufnr]
-  if not tables or not config or not config.inline_viewport_scrolling then
-    return false
-  end
-
-  local target = table_under_cursor(bufnr, tables)
-  if not target then
-    return false
-  end
-
-  local max_offset = max_view_offset(target, config)
-  if max_offset == 0 then
-    return false
-  end
-
-  view_offsets[bufnr] = view_offsets[bufnr] or {}
-  local key = table_key(target)
-  local current = view_offsets[bufnr][key] or 0
-  local next_offset = math.max(0, math.min(current + delta, max_offset))
-  if next_offset == current then
-    return true
-  end
-
-  view_offsets[bufnr][key] = next_offset
-  M.show_many(bufnr, tables, config)
-  return true
-end
-
-function M.scroll_to(bufnr, position)
-  bufnr = normalize_bufnr(bufnr)
-  local tables = active_tables[bufnr]
-  local config = active_configs[bufnr]
-  if not tables or not config or not config.inline_viewport_scrolling then
-    return false
-  end
-
-  local target = table_under_cursor(bufnr, tables)
-  if not target then
-    return false
-  end
-
-  local max_offset = max_view_offset(target, config)
-  view_offsets[bufnr] = view_offsets[bufnr] or {}
-  view_offsets[bufnr][table_key(target)] = position == "bottom" and max_offset or 0
-  M.show_many(bufnr, tables, config)
-  return true
-end
-
 function M.attach_window(bufnr)
   bufnr = normalize_bufnr(bufnr)
   if active_buffers[bufnr] and (active_configs[bufnr] or {}).inline_mode == "replace" then
-    set_render_for_buffer(bufnr, active_configs[bufnr] or {})
+    set_render_for_buffer(bufnr)
   end
-end
-
-function M.update_wrap_for_cursor(bufnr)
-  bufnr = normalize_bufnr(bufnr)
-  if not active_buffers[bufnr] then
-    return false
-  end
-
-  local config = active_configs[bufnr] or {}
-  if config.inline_mode ~= "replace" then
-    return false
-  end
-
-  set_render_for_buffer(bufnr, config)
-  return true
 end
 
 function M.namespace()

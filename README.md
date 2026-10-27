@@ -2,7 +2,7 @@
 
 A Neovim/LazyVim plugin for rendering Markdown pipe tables with wrapped cell content.
 
-It does not modify the Markdown source buffer and does not fork or patch `render-markdown.nvim`. It provides two display modes: a source-position-preserving inline overlay and a floating preview.
+It does not modify the Markdown source buffer and does not fork or patch `render-markdown.nvim`. It provides two display modes: source-position-preserving inline rendering and a floating preview.
 
 ## Why
 
@@ -15,16 +15,6 @@ It does not modify the Markdown source buffer and does not fork or patch `render
 Inline rendering in a Tokyo Night themed Markdown buffer:
 
 ![Inline table rendering](docs/01-inline-tokyonight.png)
-
-Viewport scrolling for rendered tables taller than their source table:
-
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/5bb6da3d-04f0-4608-8672-f6edfb10f2c4" width="100%"></video>
-</div>
-
-Full inline expansion when viewport mode is disabled:
-
-![Full inline rendering](docs/02b-inline-full-toggle.png)
 
 Floating preview for long table reading:
 
@@ -50,7 +40,7 @@ Floating preview for long table reading:
 - Reveals the Markdown source while typing in Insert mode, then restores the rendered table on `InsertLeave`.
 - Skips redraws when the active table content, width, and render options have not changed.
 - Avoids re-render scheduling on normal cursor movement when whole-buffer rendering is active.
-- Restores window-local `wrap`, `conceallevel`, and `concealcursor` after clearing or leaving Inline replace mode.
+- Restores window-local `conceallevel` after clearing Inline replace mode, and never changes `wrap` or `concealcursor`.
 - Highlights rendered borders, headers, inline code spans, and Markdown links separately.
 - Renders common inline Markdown inside cells to plain display text, including inline code, emphasis, strikethrough, links, autolinks, and backslash escapes. Emphasis follows CommonMark, so intraword underscores such as `snake_case_name` stay literal.
 - Keeps code-wrapped link labels aligned when Markdown conceal hides their backticks.
@@ -58,13 +48,12 @@ Floating preview for long table reading:
 - Theme presets for Tokyo Night, Catppuccin, a neutral default, and a render-markdown-inspired palette.
 - Supports inline custom themes and loading custom theme files from a theme directory.
 - Provides source-aware table cell navigation commands.
-- Provides inline viewport scrolling for rendered rows that exceed the original source table height.
 - Can also render the same table in a floating window.
 - Provides `:MarkdownTableToggleInline` for quickly switching between source and inline rendering.
 - Leaves the existing `gx` mapping untouched by default; table-aware source-buffer link handling is opt-in.
 - Does not edit the source buffer.
 - No external binaries.
-- Neovim 0.10+.
+- Neovim 0.11+.
 
 ## Installation
 
@@ -114,11 +103,6 @@ return {
       clear_on_visual = true,
       debounce_ms = 80,
       overlay_priority = 10000,
-      overlay_fill = true,
-      inline_virtual_text = "overlay",
-      inline_disable_wrap = false,
-      inline_wrap_scope = "cursor",
-      inline_viewport_scrolling = false,
       inline_line_numbers = true,
       inline_stable_height = true,
       quote_icon = "auto",
@@ -148,15 +132,10 @@ return {
       { "<leader>mi", "<cmd>MarkdownTableToggleInline<cr>", desc = "Toggle Markdown table inline view" },
       { "<leader>mc", "<cmd>MarkdownTableClosePreview<cr>", desc = "Close Markdown table preview" },
       { "<leader>mT", "<cmd>MarkdownTableToggleAutoPreview<cr>", desc = "Toggle auto Markdown table preview" },
-      { "<leader>mq", "<cmd>MarkdownTableToggleInlineViewport<cr>", desc = "Toggle inline table viewport" },
       { "]c", "<cmd>MarkdownTableNextCell<cr>", desc = "Next table cell" },
       { "[c", "<cmd>MarkdownTablePrevCell<cr>", desc = "Previous table cell" },
       { "]r", "<cmd>MarkdownTableNextRow<cr>", desc = "Next table row" },
       { "[r", "<cmd>MarkdownTablePrevRow<cr>", desc = "Previous table row" },
-      { "<leader>mj", function() require("markdown-table-wrap").scroll_view(vim.v.count1) end, desc = "Scroll rendered table down" },
-      { "<leader>mk", function() require("markdown-table-wrap").scroll_view(-vim.v.count1) end, desc = "Scroll rendered table up" },
-      { "<leader>mgg", "<cmd>MarkdownTableScrollTop<cr>", desc = "Scroll rendered table to top" },
-      { "<leader>mG", "<cmd>MarkdownTableScrollBottom<cr>", desc = "Scroll rendered table to bottom" },
     },
   },
 }
@@ -228,7 +207,6 @@ manual control and access to the optional floating mode.
 - `:MarkdownTableEnableAutoPreview` enables automatic preview in the current buffer.
 - `:MarkdownTableDisableAutoPreview` disables automatic preview in the current Source buffer.
 - `:MarkdownTableToggleAutoPreview` toggles automatic preview in the current buffer.
-- `:MarkdownTableToggleInlineViewport` toggles between viewport-sliced inline rendering and full inline rendering.
 - `:MarkdownTableStatus` shows the current auto-preview state.
 - `:MarkdownTableNextCell` moves to the next source cell in the current table row.
 - `:MarkdownTablePrevCell` moves to the previous source cell in the current table row.
@@ -236,10 +214,6 @@ manual control and access to the optional floating mode.
 - `:MarkdownTablePrevRow` moves to the same source cell in the previous table row.
 - `:MarkdownTableOpenLink` opens the first link in the current source table cell.
 - `:MarkdownTableExport[!] [tsv|csv]` copies the table under the cursor as TSV (the default) or CSV; with `!` it copies every table in the buffer, separated by blank lines.
-- `:MarkdownTableScrollDown` scrolls the rendered table view down without moving through source rows.
-- `:MarkdownTableScrollUp` scrolls the rendered table view up without moving through source rows.
-- `:MarkdownTableScrollTop` jumps the rendered table viewport to the top.
-- `:MarkdownTableScrollBottom` jumps the rendered table viewport to the bottom.
 
 Press `q` inside the floating preview window to close the float.
 
@@ -284,11 +258,6 @@ require("markdown-table-wrap").setup({
   clear_on_visual = true,
   debounce_ms = 80,
   overlay_priority = 10000,
-  overlay_fill = true,
-  inline_virtual_text = "overlay",
-  inline_disable_wrap = false,
-  inline_wrap_scope = "cursor",
-  inline_viewport_scrolling = false,
   inline_line_numbers = true,
   inline_stable_height = true,
   quote_icon = "auto",
@@ -324,7 +293,7 @@ Options:
 - `table_border`: `"rounded"` or `"single"` for rendered table corners.
 - `row_separator`: draw horizontal separators between body rows for clearer cell grouping.
 - `preview_mode`: `"inline"` (default) or `"float"` for `:MarkdownTablePreview`. Inline renders in place inside your own buffer, which stays modifiable and reveals the raw source row under the cursor.
-- `inline_mode`: `"replace"` or `"insert"`. Replace mode hides source text and overlays the rendered table in place.
+- `inline_mode`: `"replace"` or `"insert"`. Replace mode hides the source rows and draws the rendered table in their place.
 - `inline_position`: `"above"` or `"below"` for insert mode.
 - `dim_source`: dim the original Markdown table lines while insert mode is active.
 - `auto_preview`: automatically render supported buffers.
@@ -334,12 +303,7 @@ Options:
 - `clear_on_insert`: reveal source Markdown while editing, then re-render on `InsertLeave`.
 - `clear_on_visual`: in inline mode, reveal source Markdown while selecting text, then re-render after leaving Visual mode.
 - `debounce_ms`: delay before automatic refresh after movement or text changes.
-- `overlay_priority`: extmark priority used to cover other renderers such as `render-markdown.nvim`.
-- `overlay_fill`: fill the rest of each rendered source line with blank overlay text so long source rows do not leak past the rendered table.
-- `inline_virtual_text`: `"overlay"` or `"win_col"` for the replace-mode virtual text strategy. The default `"overlay"` is the more portable path.
-- `inline_disable_wrap`: temporarily set `nowrap` in windows showing inline replace mode so long source rows do not soft-wrap underneath the rendered table. Default `false`: the rendered rows are concealed and collapse to one screen line, and the row under the cursor is revealed as raw source that must soft-wrap at the window width like any other line. Setting this to `true` opts into the hard-replace behavior instead — `'wrap'` is cleared and `'concealcursor'` is set, so nothing is revealed under the cursor.
-- `inline_wrap_scope`: controls where `inline_disable_wrap` applies, and is only consulted when it is `true`. `"always"` keeps the window-wide `nowrap` behavior, `"cursor"` (the default) disables wrapping only while the cursor is inside a rendered table, and `"never"` leaves `wrap` fully under user control.
-- `inline_viewport_scrolling`: when `true`, `:MarkdownTableScrollDown` and `:MarkdownTableScrollUp` page through rendered rows inside the original table height. The default is `false`, which shows the complete rendered table inline with extra virtual lines.
+- `overlay_priority`: priority of the extmarks that carry the rendered table rows in Inline replace mode.
 - `inline_line_numbers`: draw the window's line numbers into the rendered table rows in row-anchored replace mode (virtual lines cannot receive native line numbers). Each source row's number appears on the first rendered line of that row, using the `LineNr` highlight. Shown only when the window has `'number'` or `'relativenumber'` set; with `'relativenumber'` the distance to the cursor row is shown and updates as the cursor moves. Default `true`.
 - `inline_stable_height`: pad the revealed cursor row with blank virtual lines so the table keeps a constant total screen height while the cursor moves between its rows. Without it, every move swaps a rendered row for the raw soft-wrapped source line (usually a different height), reflowing the rest of the table and everything below it. Default `true`.
 - `quote_icon`: marker drawn in front of every rendered line of a table inside a blockquote, once per quote level, using the `quote` highlight. `"auto"` (default) draws `render-markdown.nvim`'s quote bar `▋` when that plugin is loaded and the raw `>` otherwise; set it to any string to fix the marker, or to `false` to draw no marker. Rendered tables are narrowed by the marker width so they stay inside the quote block.
@@ -413,7 +377,6 @@ require("markdown-table-wrap").setup({
       italic = { fg = "#cba6f7", italic = true },
       strike = { fg = "#f38ba8", strikethrough = true },
       mark = { fg = "#1e1e2e", bg = "#f9e2af" },
-      blank = {},
     },
   },
 })
@@ -465,14 +428,12 @@ Semantic highlight keys:
 - `italic`
 - `strike`
 - `mark`
-- `blank`
 
 Content highlight keys are background-transparent when they only link to an
 existing highlight group. This prevents Inline replace mode from turning each
 cell into a filled rectangle when `Normal`, `Title`, or another linked group
 has a colorscheme background. Add an explicit `bg` to a semantic key when a
-filled background is intentional; `blank` is only the padding highlight and
-can usually be left as `{}`.
+filled background is intentional.
 
 ## Lua API
 
@@ -486,8 +447,8 @@ local mode = table_wrap.get_preview_mode(0)
 ```
 
 - `get_buffer_config(bufnr?)` returns a deep-copied effective configuration for
-  the buffer, including runtime view, auto-preview, and inline-viewport
-  overrides. Omit `bufnr` or pass `0` for the current buffer.
+  the buffer, including runtime view and auto-preview overrides. Omit `bufnr`
+  or pass `0` for the current buffer.
 - `get_preview_mode(bufnr?)` returns the buffer's effective `"inline"` or
   `"float"` mode without mutating global setup.
 
@@ -561,8 +522,8 @@ The suite currently covers:
 - Whole-buffer automatic rendering through Neovim extmarks.
 - Compact continuous-border highlight spans and colorscheme highlight replay.
 - Source-aware cell navigation, configuration validation, and opt-in table-aware `gx` installation when a filetype pre-dates plugin setup.
-- Buffer-local deferred refresh, view/auto/viewport state, option restoration,
-  and wipeout cleanup.
+- Buffer-local deferred refresh, view/auto state, option restoration, and
+  wipeout cleanup.
 
 When running from the parent development directory, use:
 
@@ -587,18 +548,9 @@ nvim --headless -u NONE --cmd "set shadafile=NONE" --cmd "set noswapfile" \
 
 The default inline mode hides source table text with extmark conceal and draws the rendered rows as virtual lines anchored to the original table rows. It does not edit the Markdown source.
 
-With `inline_viewport_scrolling = false`, the complete rendered table is shown inline by default, even when wrapped cells make it taller than the source table. This is easier to understand when first trying the plugin because there is no hidden rendered content.
-
-Enable `inline_viewport_scrolling = true` or use `:MarkdownTableToggleInlineViewport` when you prefer a scrollable visual slice inside the original source table height. In viewport mode, `:MarkdownTableScrollDown` and `:MarkdownTableScrollUp` page through the rendered table slice. In full inline mode, those commands fall back to normal window scrolling because the full rendered table is already visible as virtual lines.
-
 ## Platform Notes
 
-Inline replacement is built on Neovim extmarks, conceal, overlay virtual text, and optional virtual lines. That stack is consistent logically, but terminals and platforms can expose different visual edge cases when the original Markdown source line is longer than the window.
-
-Inline mode includes cross-platform hardening through `inline_virtual_text = "overlay"`. On Neovim 0.11 or newer the source rows are removed from the screen with `conceal_lines`, so they cannot soft-wrap into extra screen lines and `inline_disable_wrap` can stay `false`, which is what lets the row under the cursor be revealed as raw soft-wrapping source.
-
-On older Neovim the rows are only concealed, and a concealed source row can soft-wrap into extra screen lines on some terminal and platform combinations, revealing fragments of the original Markdown. There, set `inline_disable_wrap = true` (with `inline_wrap_scope = "always"` for the strictest inline stability).
-
+Inline replacement is built on Neovim extmarks: the source rows are removed from the screen with `conceal_lines` (Neovim 0.11+) and the rendered rows are drawn as virtual lines. A long source row therefore cannot soft-wrap into extra screen lines underneath the rendered table, and the plugin leaves `'wrap'` alone, which is what lets the row under the cursor be revealed as raw soft-wrapping source.
 
 ## Project Structure
 
@@ -622,8 +574,6 @@ markdown-table-wrap.nvim/
 │   └── tags
 ├── docs/
 │   ├── 01-inline-tokyonight.png
-│   ├── 02-inline-scroll.gif
-│   ├── 02b-inline-full-toggle.png
 │   └── 03-floating-long-table.png
 ├── lua/
 │   └── markdown-table-wrap/

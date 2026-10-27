@@ -12,7 +12,6 @@ h.test("system render chain only conceals detected table range", function()
     max_col_width = 14,
     min_col_width = 4,
     row_separator = true,
-    inline_viewport_scrolling = false,
   })
 
   h.with_buffer({
@@ -68,7 +67,7 @@ h.test("plugin loader does not override manual setup", function()
     table_border = "single",
     row_separator = false,
     highlight_preset = "default",
-    inline_viewport_scrolling = false,
+    inline_stable_height = false,
   })
 
   dofile(plugin_file)
@@ -76,7 +75,7 @@ h.test("plugin loader does not override manual setup", function()
   h.assert_eq("manual table_border preserved", plugin.config.table_border, "single")
   h.assert_false("manual row_separator preserved", plugin.config.row_separator)
   h.assert_eq("manual highlight_preset preserved", plugin.config.highlight_preset, "default")
-  h.assert_false("manual viewport preference preserved", plugin.config.inline_viewport_scrolling)
+  h.assert_false("manual stable height preference preserved", plugin.config.inline_stable_height)
 end)
 
 h.test("extra_filetypes renders in configured filetype", function()
