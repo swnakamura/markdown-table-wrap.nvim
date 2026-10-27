@@ -1,4 +1,5 @@
 local M = {}
+local utf8 = require("markdown-table-wrap.utf8")
 
 function M.strwidth(text)
   if type(text) == "table" then
@@ -53,6 +54,23 @@ function M.max_cell_width(cells)
   end
 
   return max_width
+end
+
+-- A column cannot be narrower than a wide glyph it contains, or that glyph
+-- overflows its border. The floor is capped at two cells: Neovim reports some
+-- joiner and control codepoints separately even though the composed grapheme
+-- takes the ordinary two-cell emoji width on screen.
+function M.glyph_width_floor(text)
+  if type(text) == "table" then
+    text = text.text or ""
+  end
+
+  for ch in utf8.iter(text or "") do
+    if M.strwidth(ch) > 1 then
+      return 2
+    end
+  end
+  return 1
 end
 
 return M

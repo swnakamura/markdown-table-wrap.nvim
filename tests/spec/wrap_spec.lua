@@ -15,19 +15,41 @@ h.test("wrap preserves token spans", function()
   h.assert_true("wrapped code span", found_code)
 end)
 
-h.test("wrap keeps inline code spans indivisible", function()
+h.test("wrap keeps fitting code spans intact and splits oversized ones within the column", function()
   local markdown = require("markdown-table-wrap.markdown")
   local wrap = require("markdown-table-wrap.wrap")
-  local lines = wrap.wrap_cell(markdown.parse_inline("before `code value/with/path` after"), 12)
+  local fitting = wrap.wrap_cell(markdown.parse_inline("before `code value/with/path` after"), 20)
+  h.assert_deep_eq(
+    "fitting code span moves whole to its own line",
+    vim.tbl_map(function(line)
+      return line.text
+    end, fitting),
+    { "before", "code value/with/path", "after" }
+  )
 
-  local found_whole_code = false
-  for _, line in ipairs(lines) do
-    if line.text == "code value/with/path" then
-      found_whole_code = true
-    end
+  local lines = wrap.wrap_cell(markdown.parse_inline("`tracepoint:sched:sched_process_exec`"), 12)
+  local pieces = {}
+  h.assert_true("oversized code span wraps", #lines > 1)
+  for index, line in ipairs(lines) do
+    h.assert_true("oversized code line fits " .. index, vim.api.nvim_strwidth(line.text) <= 12)
+    h.assert_eq("oversized code line keeps code styling " .. index, line.spans[1] and line.spans[1].kind, "code")
+    table.insert(pieces, line.text)
+  end
+  h.assert_eq("oversized code span keeps its text", table.concat(pieces), "tracepoint:sched:sched_process_exec")
+  h.assert_eq("oversized code breaks after its own punctuation", lines[1].text, "tracepoint:")
+end)
+
+h.test("wrap never emits a line wider than its limit", function()
+  local markdown = require("markdown-table-wrap.markdown")
+  local wrap = require("markdown-table-wrap.wrap")
+  local function texts(text, limit)
+    return vim.tbl_map(function(line)
+      return line.text
+    end, wrap.wrap_cell(markdown.parse_inline(text), limit))
   end
 
-  h.assert_true("code span not split", found_whole_code)
+  h.assert_deep_eq("a trailing space counts toward the fit", texts("word x", 5), { "word", "x" })
+  h.assert_deep_eq("a tab renders as one space", texts("a\tb", 5), { "a b" })
 end)
 
 h.test("wrap handles wide characters and hard breaks", function()

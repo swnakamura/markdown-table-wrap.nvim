@@ -1,4 +1,5 @@
 local width = require("markdown-table-wrap.width")
+local utf8 = require("markdown-table-wrap.utf8")
 
 local M = {}
 
@@ -14,28 +15,22 @@ local break_chars = {
   ["/"] = true,
 }
 
+-- Inside inline code, a token too long for its column is split after one of
+-- these rather than at an arbitrary character.
+local code_break_chars = {
+  [":"] = true,
+  ["."] = true,
+  ["/"] = true,
+  ["_"] = true,
+  ["-"] = true,
+  ["="] = true,
+}
+
 local whitespace_chars = {
   [" "] = true,
   ["\t"] = true,
   ["　"] = true,
 }
-
-local function iter_chars_with_pos(text)
-  local index = 1
-  return function()
-    if index > #text then
-      return nil
-    end
-
-    local start_col, end_col, ch = text:find("([%z\1-\127\194-\244][\128-\191]*)", index)
-    if not start_col then
-      return nil
-    end
-
-    index = end_col + 1
-    return ch, start_col - 1, end_col
-  end
-end
 
 -- Spans nest (a link inside bold); a character takes its innermost span.
 local function span_kind_at(spans, start_col)
@@ -58,7 +53,12 @@ local function styled_chars(cell)
   end
 
   local result = {}
-  for ch, start_col in iter_chars_with_pos(cell.text or "") do
+  for ch, start_col in utf8.iter(cell.text or "") do
+    -- nvim_strwidth, which sizes the columns, counts a tab as one cell, but a
+    -- tab is drawn up to the next tabstop, so it cannot be kept as is.
+    if ch == "\t" then
+      ch = " "
+    end
     local span = span_kind_at(cell.spans, start_col)
     if type(span) == "table" then
       table.insert(result, { text = ch, kind = span.kind, url = span.url })
@@ -123,6 +123,14 @@ local function line_from_chars(chars)
   }
 end
 
+local function chars_text(chars)
+  local parts = {}
+  for index, item in ipairs(chars) do
+    parts[index] = item.text
+  end
+  return table.concat(parts)
+end
+
 local function slice_chars(chars, start_index, end_index)
   local result = {}
   for index = start_index, end_index do
@@ -155,37 +163,56 @@ local function append_line(lines, chars)
   table.insert(lines, line_from_chars(chars))
 end
 
+-- Inline code is kept as one unbreakable item while it fits its column; one
+-- wider than the column is split into characters so it can wrap.
+local function expand_oversized_item(item, limit)
+  if item.kind ~= "code" or width.strwidth(item.text) <= limit then
+    return { item }
+  end
+
+  local pieces = {}
+  for ch in utf8.iter(item.text) do
+    table.insert(pieces, { text = ch, kind = item.kind, url = item.url })
+  end
+  return pieces
+end
+
 local function wrap_segment(chars, limit, lines)
   local current = {}
   local last_break = nil
 
-  for _, item in ipairs(chars) do
-    if #current == 0 and whitespace_chars[item.text] then
-      -- Never start a line with whitespace
-      goto continue
-    end
-
-    if #current > 0 and width.strwidth(line_from_chars(current).text .. item.text) > limit then
-      if last_break and last_break < #current then
-        append_line(lines, slice_chars(current, 1, last_break))
-        current = drop_leading_whitespace(slice_chars(current, last_break + 1, #current))
-      else
-        append_line(lines, current)
-        current = {}
+  for _, source_item in ipairs(chars) do
+    for _, item in ipairs(expand_oversized_item(source_item, limit)) do
+      if #current == 0 and whitespace_chars[item.text] then
+        -- Never start a line with whitespace
+        goto continue
       end
-      last_break = nil
+
+      -- Measured untrimmed: "word " is five cells wide even though a line
+      -- broken there renders as "word". Breaking at last_break can leave a
+      -- tail that still does not fit with the item, hence the loop.
+      while #current > 0 and width.strwidth(chars_text(current) .. item.text) > limit do
+        if last_break and last_break < #current then
+          append_line(lines, slice_chars(current, 1, last_break))
+          current = drop_leading_whitespace(slice_chars(current, last_break + 1, #current))
+        else
+          append_line(lines, current)
+          current = {}
+        end
+        last_break = nil
+      end
 
       if #current == 0 and whitespace_chars[item.text] then
         goto continue
       end
-    end
 
-    table.insert(current, item)
-    if break_chars[item.text] then
-      last_break = #current
-    end
+      table.insert(current, item)
+      if break_chars[item.text] or (item.kind == "code" and code_break_chars[item.text]) then
+        last_break = #current
+      end
 
-    ::continue::
+      ::continue::
+    end
   end
 
   if #current > 0 then

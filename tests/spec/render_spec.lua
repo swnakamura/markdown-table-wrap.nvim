@@ -353,3 +353,60 @@ h.test("render merges contiguous border highlights for large tables", function()
     h.assert_true("extmark count stays linear with a small constant", #marks <= line_count * 2)
   end)
 end)
+
+-- Generated after upstream's generated_spec: every rendered line of a table
+-- must have the same display width, or its borders do not line up.
+h.test("generated tables render every line at one display width", function()
+  local plugin = require("markdown-table-wrap")
+  local parser = require("markdown-table-wrap.parser")
+  local render = require("markdown-table-wrap.render")
+  local values = {
+    "",
+    "界😀",
+    "éclair",
+    "a\\|b",
+    "`a|b`",
+    "**bold**",
+    "[label](https://example.com)",
+    "word  tail",
+    "a\tb",
+    "日本語の長い文章です。句点で終わる。",
+    "`long_inline_code_token_here`",
+    "全角　スペース",
+    "x",
+  }
+  local seed = 1741
+  local function choose(size)
+    seed = (seed * 48271) % 2147483647
+    return (seed % size) + 1
+  end
+
+  h.with_buffer({}, function(buf)
+    vim.api.nvim_win_set_width(0, 60)
+    for case = 1, 200 do
+      local row = {}
+      for column = 1, 3 do
+        row[column] = values[choose(#values)]
+      end
+      local prefix = string.rep("> ", choose(3) - 1)
+      local source = prefix .. "| " .. table.concat(row, " | ") .. " |"
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { prefix .. "| A | B | C |", prefix .. "| - | :- | -: |", source })
+      plugin.setup({
+        auto_preview = false,
+        min_col_width = 1,
+        max_col_width = choose(12),
+        max_width_ratio = 1,
+        quote_icon = false,
+      })
+      local output = render.render_table(parser.parse_all(buf)[1], plugin.config)
+      local expected = vim.fn.strdisplaywidth(output.lines[1])
+      for _, line in ipairs(output.lines) do
+        h.assert_eq(
+          string.format("case %d, max_col_width %d, %s", case, plugin.config.max_col_width, source),
+          vim.fn.strdisplaywidth(line),
+          expected
+        )
+      end
+    end
+  end)
+end)

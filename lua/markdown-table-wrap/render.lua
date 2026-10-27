@@ -220,17 +220,22 @@ end
 local function natural_widths(table_info, config)
   local columns = #table_info.header
   local widths = {}
+  local glyph_floors = {}
   local rows = all_rows(table_info)
 
   for col = 1, columns do
     local max_width = 0
+    local glyph_floor = 1
     for _, row in ipairs(rows) do
-      max_width = math.max(max_width, width.strwidth(markdown.apply_link_icons(row[col] or "", config)))
+      local cell = markdown.apply_link_icons(row[col] or "", config)
+      max_width = math.max(max_width, width.strwidth(cell))
+      glyph_floor = math.max(glyph_floor, width.glyph_width_floor(cell))
     end
     widths[col] = max_width
+    glyph_floors[col] = glyph_floor
   end
 
-  return widths
+  return widths, glyph_floors
 end
 
 local function table_width(col_widths)
@@ -342,21 +347,23 @@ local function distribute_widths(table_info, config)
   else
     content_budget = math.max(columns * effective_min, content_budget)
   end
-  local widths = natural_widths(table_info, config)
+  local widths, glyph_floors = natural_widths(table_info, config)
+  local floors = {}
 
   for index = 1, columns do
-    widths[index] = math.max(effective_min, math.min(widths[index], config.max_col_width))
+    floors[index] = math.max(effective_min, glyph_floors[index])
+    widths[index] = math.max(floors[index], math.min(widths[index], config.max_col_width))
   end
 
   while sum(widths) > content_budget do
-    local widest_index = 1
-    for index = 2, columns do
-      if widths[index] > widths[widest_index] then
+    local widest_index = nil
+    for index = 1, columns do
+      if widths[index] > floors[index] and (not widest_index or widths[index] > widths[widest_index]) then
         widest_index = index
       end
     end
 
-    if widths[widest_index] <= effective_min then
+    if not widest_index then
       break
     end
 
