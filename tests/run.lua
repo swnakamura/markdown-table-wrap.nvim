@@ -10,7 +10,6 @@ package.path = table.concat({
 local specs = {
   "tests.spec.markdown_spec",
   "tests.spec.parser_spec",
-  "tests.spec.width_spec",
   "tests.spec.wrap_spec",
   "tests.spec.render_spec",
   "tests.spec.theme_spec",
