@@ -176,7 +176,9 @@ h.test("default setup re-renders a refreshed table in place of the old rendering
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
 
-  plugin.setup({})
+  -- Not the default 80 ms debounce: it is timing, not rendering, and sitting
+  -- it out made this the slowest test of the suite.
+  plugin.setup({ debounce_ms = 1 })
 
   -- Every extmark of the plugin namespace with its details, ids left out: a
   -- re-render legitimately allocates new ids.
@@ -190,33 +192,43 @@ h.test("default setup re-renders a refreshed table in place of the old rendering
     return result
   end
 
-  h.with_buffer(table_lines, function(buf)
+  h.with_buffer({
+    "intro paragraph",
+    "",
+    "| Name | Note |",
+    "| --- | --- |",
+    -- Not the short rows of table_lines: those render the same at both
+    -- widths, so a resize refresh that skipped re-rendering went unnoticed.
+    "| alpha | a note long enough that a narrower window has to wrap it into more lines |",
+    "",
+    "outro",
+  }, function(buf)
     vim.bo[buf].filetype = "markdown"
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
     plugin.refresh_auto()
-    local before = snapshot(buf)
+    local wide = snapshot(buf)
     local concealed, blocks = marks(buf)
     h.assert_true("the table is rendered", #blocks > 0 and concealed[3] == true)
 
     vim.cmd("MarkdownTableRefresh")
-    h.assert_deep_eq("a forced refresh leaves the same extmarks", snapshot(buf), before)
+    h.assert_deep_eq("a forced refresh leaves the same extmarks", snapshot(buf), wide)
 
-    -- A width change re-renders through the debounced resize path (the
-    -- render signature carries the window width). This table is narrow
-    -- enough to render identically at both widths.
     local columns = vim.o.columns
-    local signature = plugin.state.last_signature[buf]
-    vim.o.columns = columns - 20
-    vim.api.nvim_exec_autocmds("VimResized", {})
-    h.assert_true(
-      "the resize re-renders the table",
-      vim.wait(1000, function()
-        return plugin.state.last_signature[buf] ~= signature
-      end, 10)
-    )
-    h.assert_deep_eq("a resize-triggered re-render leaves the same extmarks", snapshot(buf), before)
+    local ok, err = pcall(function()
+      vim.o.columns = columns - 20
+      vim.api.nvim_exec_autocmds("VimResized", {})
+      h.drain_timers(1)
+      local narrow = snapshot(buf)
+      h.assert_false("the resize re-flows the table", vim.deep_equal(narrow, wide))
 
+      vim.cmd("MarkdownTableRefresh")
+      h.assert_deep_eq("the resize leaves what a forced refresh draws at the new width", narrow, snapshot(buf))
+    end)
     vim.o.columns = columns
+    if not ok then
+      error(err, 0)
+    end
+
     inline.clear(buf)
     plugin.state.inline_buf = nil
   end)

@@ -39,6 +39,19 @@ function M.test(name, fn)
   end
 end
 
+-- Waits until every timer started earlier with at most `ms` has fired: timers
+-- with one timeout fire in start order, so a sentinel started last fires last.
+-- A fixed vim.wait would have to guess the delay and sleep it out every run.
+function M.drain_timers(ms)
+  local fired = false
+  vim.defer_fn(function()
+    fired = true
+  end, ms)
+  vim.wait(1000, function()
+    return fired
+  end, 1)
+end
+
 function M.with_buffer(lines, fn)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_set_current_buf(buf)

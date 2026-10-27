@@ -189,7 +189,9 @@ h.test("setup below Neovim 0.11 reports an error and sets nothing up", function(
   }, function(buf)
     vim.bo[buf].filetype = "markdown"
     plugin.setup({ debounce_ms = 0 })
-    vim.wait(50)
+    -- A setup that went ahead would have scheduled its first refresh with no
+    -- delay, so it has run by the time a 1 ms sentinel fires.
+    h.drain_timers(1)
     h.assert_false("no table is rendered", inline.is_active(buf))
   end)
 

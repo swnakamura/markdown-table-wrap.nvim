@@ -21,19 +21,6 @@ local function delete_buffer(buf)
   end
 end
 
--- Waits until every timer started earlier with at most `ms` has fired: timers
--- with one timeout fire in start order, so a sentinel started last fires last.
--- A fixed vim.wait would have to guess the delay and sleep it out every run.
-local function drain_timers(ms)
-  local fired = false
-  vim.defer_fn(function()
-    fired = true
-  end, ms)
-  vim.wait(1000, function()
-    return fired
-  end, 1)
-end
-
 h.test("debounced refreshes are isolated by buffer and keep their scheduled target", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
@@ -100,7 +87,7 @@ h.test("repeated setup invalidates refreshes from the previous setup epoch", fun
     plugin.schedule_refresh({ bufnr = buf, winid = win, force = true })
     plugin.setup(opts)
     plugin.schedule_refresh({ bufnr = buf, winid = win })
-    drain_timers(1)
+    h.drain_timers(1)
 
     h.assert_false("the refresh scheduled before setup never renders", inline.is_active(buf))
   end)
@@ -386,7 +373,7 @@ h.test("BufWipeout disposes all per-buffer runtime state", function()
   vim.api.nvim_buf_delete(buf, { force = true })
   -- Not skipped: the refresh scheduled above fires after the wipe and must
   -- not bring any of the state back.
-  drain_timers(1)
+  h.drain_timers(1)
 
   for _, field in ipairs({
     "auto_buffers",
