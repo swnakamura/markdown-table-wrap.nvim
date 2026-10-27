@@ -82,6 +82,15 @@ h.test("wrap prefers punctuation boundaries and preserves link metadata", functi
   h.assert_true("wrapped link remains highlighted", link_spans > 0)
 end)
 
+h.test("wrap breaks after CJK sentence punctuation", function()
+  local markdown = require("markdown-table-wrap.markdown")
+  local wrap = require("markdown-table-wrap.wrap")
+  for _, mark in ipairs({ "。", "！", "？", "：" }) do
+    local lines = wrap.wrap_cell(markdown.parse_inline("短い文" .. mark .. "とても長い次の文"), 12)
+    h.assert_eq("first line ends at " .. mark, lines[1].text, "短い文" .. mark)
+  end
+end)
+
 h.test("wrap never emits blank lines", function()
   local markdown = require("markdown-table-wrap.markdown")
   local wrap = require("markdown-table-wrap.wrap")
