@@ -98,3 +98,17 @@ h.test("wrap breaks at ideographic spaces and trims them", function()
     h.assert_true("line " .. index .. " has no trailing ideographic space", line.text:sub(-3) ~= "　")
   end
 end)
+
+h.test("wrap gives a character nested in emphasis its innermost span", function()
+  local markdown = require("markdown-table-wrap.markdown")
+  local wrap = require("markdown-table-wrap.wrap")
+  local lines = wrap.wrap_cell(markdown.parse_inline("**see [doc](https://x.io)**"), 80)
+  local by_kind = {}
+  for _, span in ipairs(lines[1].spans) do
+    by_kind[span.kind] = lines[1].text:sub(span.start_col + 1, span.end_col)
+  end
+
+  h.assert_eq("wrapped text", lines[1].text, "see doc")
+  h.assert_eq("emphasis outside the link stays bold", by_kind.bold, "see ")
+  h.assert_eq("link text takes the link span", by_kind.link, "doc")
+end)

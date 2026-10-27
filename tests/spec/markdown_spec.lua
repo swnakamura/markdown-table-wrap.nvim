@@ -103,3 +103,39 @@ h.test("markdown leaves unmatched syntax visible and handles empty input", funct
   h.assert_eq("unmatched code stays visible", markdown.inline_to_text("before `unfinished"), "before `unfinished")
   h.assert_eq("unmatched link stays visible", markdown.inline_to_text("[missing]("), "[missing](")
 end)
+
+h.test("markdown display text follows CommonMark inline rules", function()
+  local markdown = require("markdown-table-wrap.markdown")
+  local cases = {
+    { "snake_case_name", "snake_case_name" },
+    { "~/path/to_file_name", "~/path/to_file_name" },
+    { "http://example.com/a_b_c", "http://example.com/a_b_c" },
+    { "\\*not italic\\*", "*not italic*" },
+    { "\\_x\\_", "_x_" },
+    { "**bold _nested_ text**", "bold nested text" },
+    { "[link with **bold**](u)", "link with bold" },
+    { "[Foo](https://en.wikipedia.org/wiki/Foo_(bar)) tail", "Foo tail" },
+    { "<https://example.com>", "https://example.com" },
+    { "``code with ` tick``", "code with ` tick" },
+    { "[[note|alias]]", "alias" },
+  }
+  for _, case in ipairs(cases) do
+    h.assert_eq("display text of " .. case[1], markdown.inline_to_text(case[1]), case[2])
+  end
+end)
+
+h.test("markdown link icons do not duplicate a link nested in emphasis", function()
+  local markdown = require("markdown-table-wrap.markdown")
+  local parsed = markdown.parse_inline("**see [doc](https://youtube.com)** end")
+  local with_icons = markdown.apply_link_icons(parsed, {
+    link = { custom = { youtube = { pattern = "youtube", icon = "Y " } } },
+  })
+
+  h.assert_eq("icon is inserted once before the nested link", with_icons.text, "see Y doc end")
+  local by_kind = {}
+  for _, span in ipairs(with_icons.spans) do
+    by_kind[span.kind] = with_icons.text:sub(span.start_col + 1, span.end_col)
+  end
+  h.assert_eq("bold span covers the icon and the link", by_kind.bold, "see Y doc")
+  h.assert_eq("link span covers its icon", by_kind.link, "Y doc")
+end)

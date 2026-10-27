@@ -37,13 +37,19 @@ local function iter_chars_with_pos(text)
   end
 end
 
+-- Spans nest (a link inside bold); a character takes its innermost span.
 local function span_kind_at(spans, start_col)
+  local found = nil
   for _, span in ipairs(spans or {}) do
-    if start_col >= span.start_col and start_col < span.end_col then
-      return span
+    if
+      start_col >= span.start_col
+      and start_col < span.end_col
+      and (not found or span.end_col - span.start_col < found.end_col - found.start_col)
+    then
+      found = span
     end
   end
-  return "text"
+  return found or "text"
 end
 
 local function styled_chars(cell)

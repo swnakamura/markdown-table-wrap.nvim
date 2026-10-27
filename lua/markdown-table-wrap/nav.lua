@@ -236,10 +236,17 @@ function M.current_cell_text()
   return vim.trim(line:sub(span.start_col + 1, span.end_col))
 end
 
+-- A wiki link names a note, not a URL, so vim.ui.open cannot open it.
+local function openable_links(links)
+  return vim.tbl_filter(function(link)
+    return link.kind ~= "wiki_link"
+  end, links)
+end
+
 function M.open_link()
   local markdown = require("markdown-table-wrap.markdown")
   local cell = M.current_cell_text()
-  local links = cell and markdown.extract_links(cell) or {}
+  local links = cell and openable_links(markdown.extract_links(cell)) or {}
 
   if #links == 0 then
     local parser = require("markdown-table-wrap.parser")
@@ -251,7 +258,7 @@ function M.open_link()
 
       for _, row in ipairs(rows) do
         for _, parsed_cell in ipairs(row) do
-          vim.list_extend(candidates, markdown.extract_links(parsed_cell))
+          vim.list_extend(candidates, openable_links(markdown.extract_links(parsed_cell)))
         end
       end
 

@@ -21,6 +21,9 @@ All notable changes to `markdown-table-wrap.nvim` are documented here.
 ### Fixed
 
 - Table cell navigation now skips the blockquote markers instead of treating them as a leading cell.
+- Cell text follows CommonMark's inline rules, using the inline parser ported from upstream v1.0.0. Intraword underscores no longer start emphasis, so `snake_case_name`, file names, and URLs keep their `_`; backslash escapes such as `\*` and `\_` show the literal character; link destinations may contain balanced parentheses; `<https://...>` and `<user@host>` autolinks render as links and open with `:MarkdownTableOpenLink`; emphasis and links nest; double-backtick code may contain a backtick; and `[[note|alias]]` shows the alias. `:MarkdownTableExport` exports the same corrected text.
+- A link inside emphasis (`**see [doc](url)**`) renders once, with its icon, instead of as raw Markdown. Upstream's parser has the same nesting and printed such a link twice; the link icons are now inserted without assuming that spans never overlap.
+- `:MarkdownTableOpenLink` no longer passes a wiki link's note name to `vim.ui.open`.
 
 ## 0.2.3 - Inline Rendering Corrections
 

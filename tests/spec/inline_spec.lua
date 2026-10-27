@@ -871,6 +871,30 @@ h.test("table link opener falls back to the only parsed table link", function()
   vim.ui.open = original_open
 end)
 
+h.test("table link opener skips wiki links and opens autolinks", function()
+  local nav = require("markdown-table-wrap.nav")
+  local opened = {}
+  local original_open = vim.ui.open
+  vim.ui.open = function(url)
+    table.insert(opened, url)
+  end
+
+  h.with_buffer({
+    "| Note | Link |",
+    "| --- | --- |",
+    "| [[Some note]] | <https://example.com> |",
+  }, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.api.nvim_win_set_cursor(0, { 3, 4 })
+    h.assert_true("wiki cell falls back to the only openable link", nav.open_link())
+    vim.api.nvim_win_set_cursor(0, { 3, 20 })
+    h.assert_true("autolink cell opens", nav.open_link())
+    h.assert_deep_eq("only the autolink target is opened", opened, { "https://example.com", "https://example.com" })
+  end)
+
+  vim.ui.open = original_open
+end)
+
 h.test("inline render draws the blockquote marker in front of rendered rows", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")

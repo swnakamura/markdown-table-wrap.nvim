@@ -54,7 +54,7 @@ Floating preview for long table reading:
 - Avoids re-render scheduling on normal cursor movement when whole-buffer rendering is active.
 - Restores window-local `wrap`, `conceallevel`, and `concealcursor` after clearing or leaving Inline replace mode.
 - Highlights rendered borders, headers, inline code spans, and Markdown links separately.
-- Renders common inline Markdown inside cells to plain display text, including inline code, emphasis, strikethrough, and links.
+- Renders common inline Markdown inside cells to plain display text, including inline code, emphasis, strikethrough, links, autolinks, and backslash escapes. Emphasis follows CommonMark, so intraword underscores such as `snake_case_name` stay literal.
 - Keeps code-wrapped link labels aligned when Markdown conceal hides their backticks.
 - Supports `==highlight==`, wiki links, image alt text, and URL-pattern-based link icons.
 - Theme presets for Tokyo Night, Catppuccin, a neutral default, and a render-markdown-inspired palette.
@@ -726,6 +726,7 @@ markdown-table-wrap.nvim/
 │       ├── reader.lua
 │       ├── render.lua
 │       ├── theme.lua
+│       ├── utf8.lua
 │       ├── width.lua
 │       └── wrap.lua
 ├── plugin/
