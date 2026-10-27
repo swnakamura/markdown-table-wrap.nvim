@@ -146,16 +146,39 @@ h.test("parser rejects table-like paragraphs without separator", function()
   end)
 end)
 
+h.test("parser accepts GFM delimiter cells with one or two hyphens", function()
+  local parser = require("markdown-table-wrap.parser")
+  local cases = {
+    { lines = { "| A | B |", "| - | -- |", "| 1 | 2 |" }, columns = 2, align = { "left", "left" } },
+    { lines = { "| a | b |", "|-|-|", "| 1 | 2 |" }, columns = 2, align = { "left", "left" } },
+    { lines = { "a|b|c", "-|-|-", "1|2|3" }, columns = 3, align = { "left", "left", "left" } },
+    {
+      lines = { "| l | c | r |", "|:-|:-:|--:|", "| 1 | 2 | 3 |" },
+      columns = 3,
+      align = { "left", "center", "right" },
+    },
+  }
+
+  for _, case in ipairs(cases) do
+    h.with_buffer(case.lines, function(buf)
+      local parsed = parser.parse_at_cursor(buf, 1)
+      h.assert_true("short delimiter accepted: " .. case.lines[2], parsed ~= nil)
+      h.assert_eq("short delimiter columns: " .. case.lines[2], parsed and #parsed.header, case.columns)
+      h.assert_deep_eq("short delimiter alignment: " .. case.lines[2], parsed and parsed.align, case.align)
+    end)
+  end
+end)
+
 h.test("parser rejects invalid GFM delimiter rows", function()
   local parser = require("markdown-table-wrap.parser")
 
   h.with_buffer({
     "| A | B |",
-    "| - | -- |",
+    "| : | -- |",
     "| 1 | 2 |",
   }, function(buf)
     local parsed = parser.parse_at_cursor(buf, 1)
-    h.assert_false("short delimiter rejected", parsed)
+    h.assert_false("delimiter cell without a hyphen rejected", parsed)
   end)
 
   h.with_buffer({
