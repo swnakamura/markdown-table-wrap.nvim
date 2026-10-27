@@ -377,6 +377,49 @@ h.test("inline insert mode highlights every wrapped header line", function()
   end)
 end)
 
+h.test("inline insert mode draws the table before its first row or after its last row", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+
+  for _, case in ipairs({
+    { position = "above", row = 2, above = true },
+    { position = "below", row = 5, above = false },
+  }) do
+    plugin.setup({
+      preview_mode = "inline",
+      inline_mode = "insert",
+      inline_position = case.position,
+      auto_preview = false,
+      render_all = true,
+    })
+
+    h.with_buffer({
+      "intro",
+      "",
+      "| A | B |",
+      "| --- | --- |",
+      "| one | two |",
+      "| three | four |",
+      "",
+      "outro",
+    }, function(buf)
+      vim.bo[buf].filetype = "markdown"
+      plugin.refresh_auto({ force = true })
+
+      local anchors = {}
+      local marks = vim.api.nvim_buf_get_extmarks(buf, inline.namespace(), 0, -1, { details = true })
+      for _, mark in ipairs(marks) do
+        if mark[4].virt_lines then
+          table.insert(anchors, { row = mark[2], above = mark[4].virt_lines_above == true })
+        end
+      end
+
+      h.assert_deep_eq(case.position .. " anchor", anchors, { { row = case.row, above = case.above } })
+      inline.clear(buf)
+    end)
+  end
+end)
+
 h.test("table link opener uses source cell urls", function()
   local nav = require("markdown-table-wrap.nav")
   local opened = nil

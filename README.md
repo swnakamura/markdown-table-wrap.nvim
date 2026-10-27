@@ -294,7 +294,7 @@ Options:
 - `row_separator`: draw horizontal separators between body rows for clearer cell grouping.
 - `preview_mode`: `"inline"` (default) or `"float"` for `:MarkdownTablePreview`. Inline renders in place inside your own buffer, which stays modifiable and reveals the raw source row under the cursor.
 - `inline_mode`: `"replace"` or `"insert"`. Replace mode hides the source rows and draws the rendered table in their place.
-- `inline_position`: `"above"` or `"below"` for insert mode.
+- `inline_position`: where insert mode draws the rendered table. `"above"` (default) draws it before the table's first row; `"below"` draws it after the table's last row.
 - `dim_source`: dim the original Markdown table lines while insert mode is active.
 - `auto_preview`: automatically render supported buffers.
 - `render_all`: render all Markdown tables in the current buffer instead of only the cursor table.

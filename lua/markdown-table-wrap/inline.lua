@@ -575,8 +575,8 @@ local function show_replace(bufnr, table_info, config, rendered)
 end
 
 local function show_insert(bufnr, table_info, config, rendered)
-  local target_line = math.max(table_info.start_lnum - 1, 0)
   local above = config.inline_position ~= "below"
+  local target_line = above and math.max(table_info.start_lnum - 1, 0) or table_info.end_lnum - 1
 
   vim.api.nvim_buf_set_extmark(bufnr, namespace, target_line, 0, {
     virt_lines = virt_lines(rendered.line_objects or rendered.lines, rendered.quote),

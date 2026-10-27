@@ -240,7 +240,9 @@ preview_mode~
 inline_mode~
     "replace" hides the source rows and draws the rendered rows in their
     place.
-    "insert" shows rendered rows above or below the source table.
+    "insert" shows the rendered table next to the source table: before the
+    table's first row with inline_position = "above" (the default), after the
+    table's last row with inline_position = "below".
 
 clear_on_visual~
     In inline mode, reveal source Markdown while selecting text and re-render

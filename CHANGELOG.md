@@ -33,6 +33,7 @@ All notable changes to `markdown-table-wrap.nvim` are documented here.
 - Delimiter cells with one or two hyphens (`|-|-|`, `| :-- | --: |`, `-|-|-`) are accepted, as GFM allows. Such tables were left unrendered.
 - Rendered rows no longer outgrow their column and push the borders out of line. Inline code wider than its column is wrapped, preferably after `:`, `.`, `/`, `_`, `-`, or `=`; code that fits still moves to the next line whole. A trailing space now counts when deciding whether the next character fits, so `word x` no longer lands on one line in a five-cell column. Tabs in a cell render as one space. A column holding a wide character is never narrowed below two cells. Ported from upstream v0.3.0 and v0.8.0.
 - Wrapping also prefers to break after `。`, `！`, `？`, and `：`, as it already did after `、` and `，`, instead of splitting the next sentence mid-word.
+- `inline_position = "below"` in Inline insert mode now draws the rendered table after the table's last row. It was drawn right after the header row, between the header and the delimiter row. `"above"` is unchanged.
 
 ## 0.2.3 - Inline Rendering Corrections
 
