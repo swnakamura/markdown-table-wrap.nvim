@@ -236,14 +236,13 @@ h.test("render keeps every source row mapped when cells wrap", function()
       row_separator = true,
     })
 
-    local first_row_lines = 0
-    for _, source_lnum in ipairs(rendered.source_lnums) do
-      if source_lnum == 3 then
-        first_row_lines = first_row_lines + 1
-      end
-    end
+    local first_row_lines = #rendered.groups[3].lines
     h.assert_true("wrapped source row maps to multiple rendered lines", first_row_lines > 1)
-    h.assert_eq("final border maps to final source row", rendered.source_lnums[#rendered.source_lnums], 4)
+    local final_row = rendered.groups[4]
+    h.assert_true(
+      "final border maps to final source row",
+      final_row.trailing[#final_row.trailing] == rendered.line_objects[#rendered.line_objects]
+    )
   end)
 end)
 
@@ -305,12 +304,10 @@ h.test("render highlights every wrapped header line as a header", function()
     end
     h.assert_true("header wraps across multiple rendered lines", header_lines > 1)
 
-    local rendered_buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(rendered_buf, 0, -1, false, rendered.lines)
-    local namespace = vim.api.nvim_create_namespace("markdown-table-wrap-test-wrapped-header")
-    render.apply_highlights(rendered_buf, rendered.line_objects, {}, { namespace = namespace })
+    local float_buf, float_win = render.open_float(rendered, { border = "rounded" })
+    local marks = vim.api.nvim_buf_get_extmarks(float_buf, -1, 0, -1, { details = true })
+    vim.api.nvim_win_close(float_win, true)
 
-    local marks = vim.api.nvim_buf_get_extmarks(rendered_buf, namespace, 0, -1, { details = true })
     local highlighted_header_lines = 0
     for _, mark in ipairs(marks) do
       local details = mark[4]
@@ -320,7 +317,6 @@ h.test("render highlights every wrapped header line as a header", function()
     end
 
     h.assert_eq("every wrapped header line uses header highlight", highlighted_header_lines, header_lines)
-    vim.api.nvim_buf_delete(rendered_buf, { force = true })
   end)
 end)
 
@@ -337,21 +333,24 @@ h.test("render merges contiguous border highlights for large tables", function()
     table.insert(line_objects, { text = line, chunks = {} })
   end
 
-  h.with_buffer(lines, function(buf)
-    local namespace = vim.api.nvim_create_namespace("markdown-table-wrap-test-border-ranges")
-    render.apply_highlights(buf, line_objects, {}, { namespace = namespace })
+  local float_buf, float_win = render.open_float({
+    lines = lines,
+    line_objects = line_objects,
+    width = vim.api.nvim_strwidth(lines[1]),
+    height = line_count,
+  }, { border = "rounded" })
+  local marks = vim.api.nvim_buf_get_extmarks(float_buf, -1, 0, -1, { details = true })
+  vim.api.nvim_win_close(float_win, true)
 
-    local marks = vim.api.nvim_buf_get_extmarks(buf, namespace, 0, -1, { details = true })
-    local border_marks = 0
-    for _, mark in ipairs(marks) do
-      if mark[4].hl_group == "MarkdownTableWrapBorder" then
-        border_marks = border_marks + 1
-      end
+  local border_marks = 0
+  for _, mark in ipairs(marks) do
+    if mark[4].hl_group == "MarkdownTableWrapBorder" then
+      border_marks = border_marks + 1
     end
+  end
 
-    h.assert_eq("one merged border range per rendered line", border_marks, line_count)
-    h.assert_true("extmark count stays linear with a small constant", #marks <= line_count * 2)
-  end)
+  h.assert_eq("one merged border range per rendered line", border_marks, line_count)
+  h.assert_true("extmark count stays linear with a small constant", #marks <= line_count * 2)
 end)
 
 -- Generated after upstream's generated_spec: every rendered line of a table

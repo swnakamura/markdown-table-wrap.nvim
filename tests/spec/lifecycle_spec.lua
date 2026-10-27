@@ -101,7 +101,7 @@ h.test("interactive mode auto and viewport choices stay buffer local", function(
 
   plugin.setup({
     auto_preview = false,
-    preview_mode = "reader",
+    preview_mode = "float",
     inline_viewport_scrolling = false,
     render_all = true,
     debounce_ms = 0,
@@ -113,8 +113,8 @@ h.test("interactive mode auto and viewport choices stay buffer local", function(
 
   h.assert_true("inline can be enabled in first buffer", plugin.toggle_inline())
   h.assert_eq("first buffer switches to inline", plugin.get_preview_mode(buf_a), "inline")
-  h.assert_eq("second buffer keeps reader default", plugin.get_preview_mode(buf_b), "reader")
-  h.assert_eq("global preview mode stays immutable", plugin.config.preview_mode, "reader")
+  h.assert_eq("second buffer keeps float default", plugin.get_preview_mode(buf_b), "float")
+  h.assert_eq("global preview mode stays immutable", plugin.config.preview_mode, "float")
   h.assert_false("global auto default stays immutable", plugin.config.auto_preview)
 
   plugin.toggle_inline_viewport_scrolling()
@@ -354,7 +354,6 @@ h.test("BufWipeout disposes all per-buffer runtime state", function()
 
   plugin.setup({
     auto_preview = false,
-    preview_mode = "reader",
     render_all = true,
     debounce_ms = 30,
   })
@@ -363,8 +362,13 @@ h.test("BufWipeout disposes all per-buffer runtime state", function()
   vim.api.nvim_set_current_buf(buf)
   plugin.toggle_inline()
   plugin.toggle_inline_viewport_scrolling()
-  plugin.pause_buffer(buf)
+  plugin.state.paused_buffers[buf] = true
   plugin.schedule_refresh({ bufnr = buf, winid = vim.api.nvim_get_current_win(), force = true })
+  -- Without these the cleanup assertions below would pass on state that was
+  -- never there.
+  h.assert_eq("buffer is the active inline buffer before the wipe", plugin.state.inline_buf, buf)
+  h.assert_true("buffer is paused before the wipe", plugin.state.paused_buffers[buf] == true)
+  h.assert_true("buffer has a render signature before the wipe", plugin.state.last_signature[buf] ~= nil)
   vim.api.nvim_buf_delete(buf, { force = true })
   vim.wait(80)
 
@@ -431,56 +435,6 @@ h.test("repeated setup resets inline viewport offsets", function()
     plugin.refresh_auto({ force = true })
     h.assert_eq("setup starts viewport at the top again", first_overlay(buf), initial)
     inline.dispose(buf)
-  end)
-end)
-
-h.test("reader auto-open requires a table but explicit Reader still opens", function()
-  local plugin = require("markdown-table-wrap")
-  local reader = require("markdown-table-wrap.reader")
-
-  -- Reader is opt-in (the default preview mode is "inline"), so the auto-open
-  -- policy under test only applies once reader mode is requested.
-  plugin.setup({ debounce_ms = 0, preview_mode = "reader" })
-
-  h.with_buffer({ "# Notes", "", "No table in this document." }, function(source_buf)
-    vim.bo[source_buf].filetype = "markdown"
-    plugin.state.paused_buffers[source_buf] = nil
-
-    h.assert_eq("reader defaults to table-only auto-open", plugin.config.reader.auto_open, "has_table")
-    plugin.refresh_auto()
-    h.assert_eq("automatic refresh keeps no-table source visible", vim.api.nvim_get_current_buf(), source_buf)
-    h.assert_false("automatic refresh does not create Reader", reader.is_reader(0))
-
-    vim.cmd("MarkdownTableReader")
-    local reader_buf = vim.api.nvim_get_current_buf()
-    h.assert_true("explicit Reader command opens no-table document", reader.is_reader(reader_buf))
-    plugin.close_reader()
-    plugin.state.paused_buffers[source_buf] = nil
-
-    plugin.setup({ debounce_ms = 0, preview_mode = "reader", reader = { auto_open = "always" } })
-    plugin.refresh_auto()
-    h.assert_true("always policy preserves automatic no-table Reader", reader.is_reader(0))
-    plugin.disable_auto_preview()
-    h.assert_eq("disabling from Reader returns to source", vim.api.nvim_get_current_buf(), source_buf)
-    h.assert_false("disabling from Reader updates source auto state", plugin.get_buffer_config(source_buf).auto_preview)
-  end)
-end)
-
-h.test("repeated setup reconfigures an open Reader", function()
-  local plugin = require("markdown-table-wrap")
-  local reader = require("markdown-table-wrap.reader")
-  plugin.setup({ auto_preview = false, reader = { wrap = true } })
-
-  h.with_buffer(table_lines, function(source_buf)
-    vim.bo[source_buf].filetype = "markdown"
-    local reader_buf = plugin.reader_preview()
-    h.assert_true("Reader opens before reconfiguration", reader.is_reader(reader_buf))
-    h.assert_true("Reader starts with wrap enabled", vim.wo.wrap)
-
-    plugin.setup({ auto_preview = false, reader = { wrap = false } })
-    h.assert_true("Reader stays open across setup", reader.is_reader(0))
-    h.assert_false("open Reader receives the new window options", vim.wo.wrap)
-    plugin.close_reader()
   end)
 end)
 

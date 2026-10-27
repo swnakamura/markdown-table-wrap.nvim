@@ -17,7 +17,6 @@ h.test("setup normalizes invalid configuration without breaking rendering", func
     inline_wrap_scope = "invalid",
     highlight_preset = "not-a-preset",
     extra_filetypes = { "text", 1 },
-    reader = false,
     link = false,
     themes = false,
     highlights = false,
@@ -37,7 +36,6 @@ h.test("setup normalizes invalid configuration without breaking rendering", func
   h.assert_eq("invalid wrap scope falls back", plugin.config.inline_wrap_scope, "cursor")
   h.assert_eq("invalid preset falls back", plugin.config.highlight_preset, "default")
   h.assert_deep_eq("invalid filetypes are ignored", plugin.config.extra_filetypes, {})
-  h.assert_true("reader config is restored", type(plugin.config.reader) == "table")
   h.assert_true("link config is restored", type(plugin.config.link) == "table")
   h.assert_deep_eq("invalid themes are ignored", plugin.config.themes, {})
   h.assert_deep_eq("invalid highlights are ignored", plugin.config.highlights, {})
@@ -68,19 +66,12 @@ h.test("setup installs gx when Markdown filetype predates plugin loading", funct
   end)
 end)
 
-h.test("safe defaults leave gx untouched and normalize Reader options", function()
+h.test("safe defaults leave gx untouched", function()
   local plugin = require("markdown-table-wrap")
 
   h.with_buffer({ "ordinary Markdown prose" }, function(buf)
     vim.bo[buf].filetype = "markdown"
-    plugin.setup({
-      auto_preview = false,
-      reader = {
-        auto_open = "invalid",
-        conceallevel = 2.8,
-        concealcursor = "invalid",
-      },
-    })
+    plugin.setup({ auto_preview = false })
 
     local plugin_mapping = false
     for _, item in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
@@ -91,9 +82,6 @@ h.test("safe defaults leave gx untouched and normalize Reader options", function
 
     h.assert_false("gx override is opt-in", plugin.config.map_gx)
     h.assert_false("default setup does not add a buffer-local gx", plugin_mapping)
-    h.assert_eq("invalid Reader auto-open falls back", plugin.config.reader.auto_open, "has_table")
-    h.assert_eq("Reader conceallevel is an integer", plugin.config.reader.conceallevel, 2)
-    h.assert_eq("invalid concealcursor falls back", plugin.config.reader.concealcursor, "nvc")
   end)
 end)
 
@@ -116,8 +104,6 @@ h.test("all documented commands exist after setup", function()
 
   for _, command in ipairs({
     "MarkdownTablePreview",
-    "MarkdownTableReader",
-    "MarkdownTableEditSource",
     "MarkdownTableFloatPreview",
     "MarkdownTableToggleAutoPreview",
     "MarkdownTableRefresh",
@@ -128,6 +114,23 @@ h.test("all documented commands exist after setup", function()
   }) do
     h.assert_eq("command exists: " .. command, vim.fn.exists(":" .. command), 2)
   end
+end)
+
+h.test("Reader mode is gone and inline stays the default preview mode", function()
+  local plugin = require("markdown-table-wrap")
+  plugin.setup({ auto_preview = false })
+  h.assert_eq("default preview mode", plugin.config.preview_mode, "inline")
+
+  for _, command in ipairs({
+    "MarkdownTableReader",
+    "MarkdownTableToggleReader",
+    "MarkdownTableEditSource",
+  }) do
+    h.assert_eq("removed command is absent: " .. command, vim.fn.exists(":" .. command), 0)
+  end
+
+  plugin.setup({ auto_preview = false, preview_mode = "reader" })
+  h.assert_eq("a leftover reader preview mode falls back to inline", plugin.get_preview_mode(0), "inline")
 end)
 
 h.test("repeated setup replaces plugin autocmds instead of accumulating them", function()

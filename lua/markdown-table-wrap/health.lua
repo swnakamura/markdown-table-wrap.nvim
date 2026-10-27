@@ -43,7 +43,6 @@ function M.check()
     "markdown-table-wrap.wrap",
     "markdown-table-wrap.render",
     "markdown-table-wrap.inline",
-    "markdown-table-wrap.reader",
     "markdown-table-wrap.theme",
   }
 

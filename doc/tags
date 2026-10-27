@@ -1,6 +1,5 @@
 :MarkdownTableClosePreview	markdown-table-wrap.txt	/*:MarkdownTableClosePreview*
 :MarkdownTableDisableAutoPreview	markdown-table-wrap.txt	/*:MarkdownTableDisableAutoPreview*
-:MarkdownTableEditSource	markdown-table-wrap.txt	/*:MarkdownTableEditSource*
 :MarkdownTableEnableAutoPreview	markdown-table-wrap.txt	/*:MarkdownTableEnableAutoPreview*
 :MarkdownTableExport	markdown-table-wrap.txt	/*:MarkdownTableExport*
 :MarkdownTableFloatPreview	markdown-table-wrap.txt	/*:MarkdownTableFloatPreview*
@@ -11,7 +10,6 @@
 :MarkdownTablePrevCell	markdown-table-wrap.txt	/*:MarkdownTablePrevCell*
 :MarkdownTablePrevRow	markdown-table-wrap.txt	/*:MarkdownTablePrevRow*
 :MarkdownTablePreview	markdown-table-wrap.txt	/*:MarkdownTablePreview*
-:MarkdownTableReader	markdown-table-wrap.txt	/*:MarkdownTableReader*
 :MarkdownTableRefresh	markdown-table-wrap.txt	/*:MarkdownTableRefresh*
 :MarkdownTableScrollBottom	markdown-table-wrap.txt	/*:MarkdownTableScrollBottom*
 :MarkdownTableScrollDown	markdown-table-wrap.txt	/*:MarkdownTableScrollDown*
@@ -22,7 +20,6 @@
 :MarkdownTableToggleInline	markdown-table-wrap.txt	/*:MarkdownTableToggleInline*
 :MarkdownTableToggleInlineViewport	markdown-table-wrap.txt	/*:MarkdownTableToggleInlineViewport*
 :MarkdownTableTogglePreview	markdown-table-wrap.txt	/*:MarkdownTableTogglePreview*
-:MarkdownTableToggleReader	markdown-table-wrap.txt	/*:MarkdownTableToggleReader*
 markdown-table-wrap-api	markdown-table-wrap.txt	/*markdown-table-wrap-api*
 markdown-table-wrap-commands	markdown-table-wrap.txt	/*markdown-table-wrap-commands*
 markdown-table-wrap-configuration	markdown-table-wrap.txt	/*markdown-table-wrap-configuration*

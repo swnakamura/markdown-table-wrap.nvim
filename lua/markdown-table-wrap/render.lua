@@ -117,23 +117,16 @@ local function border_ranges(text)
   return ranges
 end
 
-local function apply_highlights(buf, lines, config, opts)
-  opts = opts or {}
+local function apply_highlights(buf, lines, config)
   ensure_highlights(config)
-  local namespace = opts.namespace or float_namespace
-  local start_row = opts.start_row or 0
-
-  if opts.clear ~= false then
-    vim.api.nvim_buf_clear_namespace(buf, namespace, 0, -1)
-  end
 
   for row, line_obj in ipairs(lines) do
     local line = type(line_obj) == "table" and line_obj.text or line_obj
-    local row_index = start_row + row - 1
+    local row_index = row - 1
     local is_header = type(line_obj) == "table" and line_obj.is_header
     local line_hl = (is_header or row == 2) and "MarkdownTableWrapHeader" or "MarkdownTableWrapInline"
 
-    vim.api.nvim_buf_set_extmark(buf, namespace, row_index, 0, {
+    vim.api.nvim_buf_set_extmark(buf, float_namespace, row_index, 0, {
       end_row = row_index,
       end_col = #line,
       hl_group = line_hl,
@@ -141,7 +134,7 @@ local function apply_highlights(buf, lines, config, opts)
     })
 
     for _, range in ipairs(border_ranges(line)) do
-      vim.api.nvim_buf_set_extmark(buf, namespace, row_index, range[1], {
+      vim.api.nvim_buf_set_extmark(buf, float_namespace, row_index, range[1], {
         end_row = row_index,
         end_col = range[2],
         hl_group = "MarkdownTableWrapBorder",
@@ -156,13 +149,9 @@ local function apply_highlights(buf, lines, config, opts)
         hl_group = chunk.hl_group,
         priority = 30,
       }
-      vim.api.nvim_buf_set_extmark(buf, namespace, row_index, chunk.start_col, mark)
+      vim.api.nvim_buf_set_extmark(buf, float_namespace, row_index, chunk.start_col, mark)
     end
   end
-end
-
-function M.apply_highlights(buf, lines, config, opts)
-  apply_highlights(buf, lines, config, opts)
 end
 
 local function text_of(line)
@@ -449,8 +438,7 @@ function M.render_table(table_info, config)
   -- Group rendered lines per source line so inline replace mode can anchor
   -- each source row to the first visible line of its rendered row.
   -- groups[1] = header source line, groups[2] = separator source line,
-  -- groups[2 + i] = body row i. Every group carries the source line it came
-  -- from, so the flat `source_lnums` list stays derivable from the grouping.
+  -- groups[2 + i] = body row i.
   local groups = {}
 
   local header_lines = render_row(table_info.header, col_widths, table_info.align, chars, config)
@@ -459,13 +447,11 @@ function M.render_table(table_info, config)
   end
 
   table.insert(groups, {
-    source_lnum = table_info.start_lnum,
     leading = { border_line(chars, chars.top_left, chars.top_join, chars.top_right, col_widths) },
     lines = header_lines,
   })
 
   table.insert(groups, {
-    source_lnum = table_info.separator_lnum,
     lines = { border_line(chars, chars.mid_left, chars.mid_join, chars.mid_right, col_widths) },
   })
 
@@ -474,7 +460,6 @@ function M.render_table(table_info, config)
   -- cursor, so the boundary to the next row never disappears.
   for row_index, row in ipairs(table_info.rows) do
     local group = {
-      source_lnum = table_info.separator_lnum + row_index,
       lines = render_row(row, col_widths, table_info.align, chars, config),
       trailing = {},
     }
@@ -498,30 +483,22 @@ function M.render_table(table_info, config)
   end
 
   local lines = {}
-  local source_lnums = {}
-
-  local function append(line, source_lnum)
-    table.insert(lines, line)
-    table.insert(source_lnums, source_lnum)
-  end
 
   for _, group in ipairs(groups) do
-    local source_lnum = group.source_lnum or table_info.start_lnum
     for _, line in ipairs(group.leading or {}) do
-      append(line, source_lnum)
+      table.insert(lines, line)
     end
     for _, line in ipairs(group.lines) do
-      append(line, source_lnum)
+      table.insert(lines, line)
     end
     for _, line in ipairs(group.trailing or {}) do
-      append(line, source_lnum)
+      table.insert(lines, line)
     end
   end
 
   return {
     lines = vim.tbl_map(text_of, lines),
     line_objects = lines,
-    source_lnums = source_lnums,
     groups = groups,
     quote = M.quote_marker(table_info, config),
     width = table_width(col_widths),

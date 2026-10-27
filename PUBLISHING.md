@@ -115,12 +115,8 @@ several tables, links, escaped pipes, code spans, and mixed CJK/English text.
 
 ### Default Behavior And State Isolation
 
-- With the default `reader.auto_open = "has_table"`, confirm plain Markdown
-  remains in Source.
-- Confirm a document containing a table automatically opens Reader and renders
-  all tables without cursor focus.
-- Set `reader.auto_open = "always"` and confirm a table-free supported buffer
-  opens Reader.
+- Confirm a document containing a table renders all tables inline, in place,
+  without cursor focus.
 - Open two Markdown buffers, choose different views, and confirm toggling one
   does not change the other's mode or the global configured default.
 - Trigger edits/refreshes in two buffers in quick succession and confirm each
@@ -134,21 +130,11 @@ several tables, links, escaped pipes, code spans, and mixed CJK/English text.
   `map_gx = false`, confirm the mapping remains unchanged in Source.
 - Confirm `:MarkdownTableOpenLink` opens a table-cell URL.
 - Set `map_gx = true` and confirm table links open through the opt-in mapping.
-- Confirm Reader `gx` opens the original URL rather than its displayed label.
 - Confirm ordinary links outside tables retain their normal behavior.
 
-### Reader, Inline, And Float
+### Inline And Float
 
-- Confirm Reader Visual selection/yank uses real rendered lines and does not
-  edit source text.
-- Confirm `i`, `a`, `I`, `A`, `o`, and `O` return to the mapped source line and
-  Reader reopens after `InsertLeave`.
-- Confirm `:w`, `:wq`, `:x`, and `ZZ` forward saves to the backing Markdown
-  source; confirm anonymous-buffer errors are clear.
-- Confirm `:MarkdownTableToggleReader`, `:MarkdownTableEditSource`, and
-  `:MarkdownTableToggleInline` have the documented transitions.
-- Run `:MarkdownTableDisableAutoPreview` from Reader and confirm it disables
-  automatic rendering for the backing Source buffer.
+- Confirm `:MarkdownTableToggleInline` has the documented transitions.
 - Confirm Inline restores window-local `wrap`, `conceallevel`, and
   `concealcursor` when leaving the buffer or clearing the view.
 - Confirm full Inline and viewport-sliced Inline scrolling/top/bottom commands.
@@ -160,9 +146,8 @@ several tables, links, escaped pipes, code spans, and mixed CJK/English text.
   Inline replace and insert modes.
 - Scroll an Inline viewport, call `setup()` again, and confirm the stale viewport
   offset is not retained.
-- Change Reader window options through a repeated `setup()` call and confirm an
-  already open Reader adopts them; confirm a delayed pre-setup refresh cannot
-  overwrite the new configuration.
+- Call `setup()` again and confirm a delayed pre-setup refresh cannot overwrite
+  the new configuration.
 - Confirm Float opens, scrolls, follows link metadata, and closes with `q`.
 
 ### Parsing, Performance, Theme, And Filetypes

@@ -12,9 +12,7 @@ local defaults = {
   table_border = "rounded",
   row_separator = true,
   -- Render in place, inside the user's own buffer: the source stays editable
-  -- and the row under the cursor is revealed as raw markdown. Reader mode
-  -- (a separate, non-modifiable scratch buffer) is available on request with
-  -- preview_mode = "reader" or :MarkdownTableReader.
+  -- and the row under the cursor is revealed as raw markdown.
   preview_mode = "inline",
   inline_mode = "replace",
   inline_position = "above",
@@ -60,14 +58,6 @@ local defaults = {
   -- "auto" uses render-markdown.nvim's quote bar when that plugin is loaded
   -- and the raw ">" otherwise; set to false to draw no marker.
   quote_icon = "auto",
-  reader = {
-    auto_open = "has_table",
-    wrap = true,
-    linebreak = false,
-    breakindent = true,
-    conceallevel = 2,
-    concealcursor = "nvc",
-  },
   highlight_preset = "default",
   theme_dir = nil,
   themes = {},
@@ -99,10 +89,6 @@ M.state = {
   paused_buffers = {},
   auto_buffers = {},
   buffer_modes = {},
-  -- Per-buffer preview mode that was in force before an explicit Reader was
-  -- opened, so closing it can hand the buffer back its own choice instead of
-  -- the global one. `false` records "there was no override".
-  pre_reader_modes = {},
   inline_viewports = {},
   gx_fallbacks = {},
   gx_installed = {},
@@ -132,10 +118,6 @@ end
 local function is_markdown_buffer(bufnr)
   bufnr = normalize_bufnr(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
-    return false
-  end
-
-  if vim.b[bufnr].markdown_table_wrap_reader == true then
     return false
   end
 
@@ -216,21 +198,6 @@ local function validate_config()
     end
   end
 
-  if type(M.config.reader) ~= "table" then
-    M.config.reader = vim.deepcopy(defaults.reader)
-  end
-  if not vim.tbl_contains({ "has_table", "always" }, M.config.reader.auto_open) then
-    M.config.reader.auto_open = defaults.reader.auto_open
-  end
-  M.config.reader.wrap = M.config.reader.wrap ~= false
-  M.config.reader.linebreak = M.config.reader.linebreak == true
-  M.config.reader.breakindent = M.config.reader.breakindent ~= false
-  M.config.reader.conceallevel =
-    math.floor(math.max(0, math.min(3, tonumber(M.config.reader.conceallevel) or defaults.reader.conceallevel)))
-  if type(M.config.reader.concealcursor) ~= "string" or M.config.reader.concealcursor:match("^[nvic]*$") == nil then
-    M.config.reader.concealcursor = defaults.reader.concealcursor
-  end
-
   if type(M.config.themes) ~= "table" then
     M.config.themes = {}
   end
@@ -261,7 +228,7 @@ local function validate_config()
     M.config.inline_virtual_text = defaults.inline_virtual_text
   end
 
-  if M.config.preview_mode ~= "inline" and M.config.preview_mode ~= "float" and M.config.preview_mode ~= "reader" then
+  if M.config.preview_mode ~= "inline" and M.config.preview_mode ~= "float" then
     M.config.preview_mode = defaults.preview_mode
   end
 
@@ -370,11 +337,7 @@ local function attach_link_keymap(bufnr)
     return
   end
 
-  if
-    not M.config.map_gx
-    or vim.b[bufnr].markdown_table_wrap_reader == true
-    or not is_supported_filetype(vim.bo[bufnr].filetype)
-  then
+  if not M.config.map_gx or not is_supported_filetype(vim.bo[bufnr].filetype) then
     restore_gx_mapping(bufnr)
     return
   end
@@ -469,11 +432,6 @@ local function all_tables_signature(bufnr, tables, config)
 end
 
 function M.close_preview()
-  if require("markdown-table-wrap.reader").is_reader(0) then
-    M.close_reader()
-    return
-  end
-
   close_existing()
   local bufnr = vim.api.nvim_get_current_buf()
   require("markdown-table-wrap.inline").clear(bufnr)
@@ -525,116 +483,8 @@ function M.inline_preview()
   M.state.inline_buf = bufnr
 end
 
-function M.reader_preview(opts)
-  opts = opts or {}
-  local bufnr = vim.api.nvim_get_current_buf()
-  local reader = require("markdown-table-wrap.reader")
-
-  if reader.is_reader(bufnr) then
-    return bufnr
-  end
-
-  if not is_markdown_buffer() then
-    if not opts.silent then
-      vim.notify("MarkdownTableWrap: reader mode is only available in Markdown buffers.", vim.log.levels.INFO)
-    end
-    return nil
-  end
-
-  if not opts.auto then
-    -- Remember what this buffer was set to, so closing the Reader restores it
-    -- rather than dropping the buffer onto the global mode.
-    if M.state.buffer_modes[bufnr] ~= "reader" then
-      M.state.pre_reader_modes[bufnr] = M.state.buffer_modes[bufnr] or false
-    end
-    M.state.buffer_modes[bufnr] = "reader"
-  end
-
-  close_existing()
-  require("markdown-table-wrap.inline").clear(bufnr)
-  M.state.inline_buf = nil
-  M.state.last_signature[bufnr] = nil
-  M.state.paused_buffers[bufnr] = nil
-  return reader.open(bufnr, config_for_buffer(bufnr))
-end
-
-function M.pause_buffer(bufnr)
-  bufnr = normalize_bufnr(bufnr)
-  M.state.paused_buffers[bufnr] = true
-  M.state.last_signature[bufnr] = nil
-end
-
--- A Reader has gone away: put its source buffer back on the mode it was on
--- before the Reader was opened -- its own override when it had one, the
--- global mode otherwise -- and decide whether rendering resumes there.
--- Reading the mode only makes sense after the override is undone, since it is
--- still "reader" until then.
---
--- Used both by close_reader() and by the BufWipeout teardown, so deleting a
--- Reader buffer leaves the source in the same state as closing it properly.
-local function release_reader_mode(source_bufnr)
-  if not source_bufnr then
-    return
-  end
-
-  local previous = M.state.pre_reader_modes[source_bufnr]
-  if previous ~= nil then
-    M.state.buffer_modes[source_bufnr] = previous or nil
-    M.state.pre_reader_modes[source_bufnr] = nil
-  elseif M.state.buffer_modes[source_bufnr] == "reader" then
-    M.state.buffer_modes[source_bufnr] = nil
-  end
-
-  if preview_mode_for(source_bufnr) == "reader" then
-    -- Reader is what this buffer is configured for, so an automatic refresh
-    -- would reopen it straight away. Pause, so that leaving Reader keeps the
-    -- source visible until rendering is asked for again.
-    M.pause_buffer(source_bufnr)
-    return
-  end
-
-  -- The configured mode renders inside the source buffer itself, so leaving
-  -- Reader returns to it. Pausing here would strand the buffer unrendered,
-  -- with no cursor move, scroll, or edit able to bring it back.
-  M.state.paused_buffers[source_bufnr] = nil
-  M.state.last_signature[source_bufnr] = nil
-  if vim.api.nvim_buf_is_valid(source_bufnr) then
-    M.schedule_refresh({ bufnr = source_bufnr, silent = true, immediate = true })
-  end
-end
-
-function M.close_reader()
-  local reader = require("markdown-table-wrap.reader")
-  local bufnr = vim.api.nvim_get_current_buf()
-  if not reader.is_reader(bufnr) then
-    return false
-  end
-
-  local source_bufnr = reader.close(bufnr)
-  if source_bufnr then
-    release_reader_mode(source_bufnr)
-    return true
-  end
-  return false
-end
-
 function M.export_table(opts)
   return require("markdown-table-wrap.export").export(opts)
-end
-
-function M.toggle_reader()
-  if require("markdown-table-wrap.reader").is_reader(0) then
-    return M.close_reader()
-  end
-  return M.reader_preview()
-end
-
-function M.edit_source()
-  local reader = require("markdown-table-wrap.reader")
-  if not reader.is_reader(0) then
-    return false
-  end
-  return reader.edit(0, nil, true)
 end
 
 function M.float_preview()
@@ -657,11 +507,6 @@ function M.preview()
   local mode = preview_mode_for(vim.api.nvim_get_current_buf())
   if mode == "float" then
     M.float_preview()
-    return
-  end
-
-  if mode == "reader" then
-    M.reader_preview()
     return
   end
 
@@ -703,19 +548,6 @@ function M.refresh_auto(opts)
   end
 
   local parser = require("markdown-table-wrap.parser")
-  if config.preview_mode == "reader" then
-    if config.reader.auto_open == "has_table" and #parser.parse_all(bufnr) == 0 then
-      inline.clear(bufnr)
-      M.state.last_signature[bufnr] = nil
-      if M.state.inline_buf == bufnr then
-        M.state.inline_buf = nil
-      end
-      return
-    end
-    M.reader_preview({ silent = true, auto = true })
-    return
-  end
-
   if config.render_all then
     local tables = parser.parse_all(bufnr)
     if #tables == 0 then
@@ -806,11 +638,6 @@ function M.schedule_refresh(opts)
 end
 
 function M.toggle_preview()
-  if require("markdown-table-wrap.reader").is_reader(0) then
-    M.close_reader()
-    return
-  end
-
   if M.state.win and vim.api.nvim_win_is_valid(M.state.win) then
     close_existing()
     return
@@ -831,16 +658,7 @@ end
 
 function M.toggle_inline()
   local inline = require("markdown-table-wrap.inline")
-  local reader = require("markdown-table-wrap.reader")
   local bufnr = vim.api.nvim_get_current_buf()
-
-  if reader.is_reader(bufnr) then
-    local source_bufnr = reader.source_bufnr(bufnr)
-    if not M.close_reader() then
-      return false
-    end
-    bufnr = source_bufnr
-  end
 
   if not is_markdown_buffer() then
     vim.notify("MarkdownTableWrap: inline rendering is only available in Markdown buffers.", vim.log.levels.INFO)
@@ -870,14 +688,6 @@ function M.enable_auto_preview()
 end
 
 function M.disable_auto_preview()
-  if require("markdown-table-wrap.reader").is_reader(0) then
-    local source_bufnr = require("markdown-table-wrap.reader").source_bufnr(0)
-    if M.close_reader() and source_bufnr then
-      M.state.auto_buffers[source_bufnr] = false
-    end
-    return
-  end
-
   local bufnr = vim.api.nvim_get_current_buf()
   M.state.paused_buffers[bufnr] = true
   M.state.auto_buffers[bufnr] = false
@@ -967,12 +777,6 @@ local function create_autocmds()
         local bufnr = args.buf
         if not bufnr or bufnr == 0 or not vim.api.nvim_buf_is_valid(bufnr) then
           bufnr = vim.api.nvim_get_current_buf()
-        end
-        if require("markdown-table-wrap.reader").is_reader(bufnr) then
-          if args.event == "WinResized" or args.event == "VimResized" then
-            require("markdown-table-wrap.reader").refresh(bufnr)
-          end
-          return
         end
 
         if not is_markdown_buffer(bufnr) then
@@ -1083,16 +887,11 @@ local function create_autocmds()
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = M.state.augroup,
     callback = function(args)
-      -- A Reader buffer can disappear without close_reader() ever running
-      -- (:bd, :bwipeout, quitting its last window). Its source would then be
-      -- left overridden to "reader" and unrendered forever.
-      release_reader_mode(require("markdown-table-wrap.reader").cleanup(args.buf))
       require("markdown-table-wrap.inline").dispose(args.buf)
       M.state.refresh_tokens[args.buf] = nil
       M.state.paused_buffers[args.buf] = nil
       M.state.auto_buffers[args.buf] = nil
       M.state.buffer_modes[args.buf] = nil
-      M.state.pre_reader_modes[args.buf] = nil
       M.state.inline_viewports[args.buf] = nil
       M.state.gx_fallbacks[args.buf] = nil
       M.state.gx_installed[args.buf] = nil
@@ -1146,7 +945,6 @@ function M.setup(opts)
   M.state.paused_buffers = {}
   M.state.auto_buffers = {}
   M.state.buffer_modes = {}
-  M.state.pre_reader_modes = {}
   M.state.inline_viewports = {}
   M.state.last_signature = {}
   M.state.visual_buffers = {}
@@ -1155,14 +953,7 @@ function M.setup(opts)
   require("markdown-table-wrap.theme").apply(M.config)
   M.state.did_setup = true
 
-  local reader = require("markdown-table-wrap.reader")
   for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-    if reader.is_reader(bufnr) then
-      local source_bufnr = reader.source_bufnr(bufnr)
-      if source_bufnr then
-        reader.reconfigure(bufnr, config_for_buffer(source_bufnr))
-      end
-    end
     attach_link_keymap(bufnr)
   end
 
@@ -1177,18 +968,6 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("MarkdownTableFloatPreview", function()
     M.float_preview()
   end, { desc = "Floating preview the Markdown pipe table under the cursor with wrapped cells", force = true })
-
-  vim.api.nvim_create_user_command("MarkdownTableReader", function()
-    M.reader_preview()
-  end, { desc = "Open the current Markdown buffer in the rendered reader", force = true })
-
-  vim.api.nvim_create_user_command("MarkdownTableToggleReader", function()
-    M.toggle_reader()
-  end, { desc = "Toggle the rendered Markdown reader", force = true })
-
-  vim.api.nvim_create_user_command("MarkdownTableEditSource", function()
-    M.edit_source()
-  end, { desc = "Leave the rendered reader and edit the Markdown source", force = true })
 
   vim.api.nvim_create_user_command("MarkdownTableTogglePreview", function()
     M.toggle_preview()
@@ -1220,18 +999,15 @@ function M.setup(opts)
 
   vim.api.nvim_create_user_command("MarkdownTableStatus", function()
     local bufnr = vim.api.nvim_get_current_buf()
-    local reader_active = require("markdown-table-wrap.reader").is_reader(bufnr)
     local active = require("markdown-table-wrap.inline").is_active(bufnr)
-    local source_bufnr = reader_active and require("markdown-table-wrap.reader").source_bufnr(bufnr) or bufnr
-    local paused = M.state.paused_buffers[source_bufnr] == true
-    local config = config_for_buffer(source_bufnr)
+    local paused = M.state.paused_buffers[bufnr] == true
+    local config = config_for_buffer(bufnr)
     vim.notify(
       string.format(
-        "MarkdownTableWrap: auto=%s paused=%s active=%s reader=%s mode=%s/%s wrap=%s",
+        "MarkdownTableWrap: auto=%s paused=%s active=%s mode=%s/%s wrap=%s",
         tostring(config.auto_preview),
         tostring(paused),
         tostring(active),
-        tostring(reader_active),
         config.preview_mode,
         config.inline_mode .. (config.inline_viewport_scrolling and "/viewport" or "/full"),
         config.inline_wrap_scope

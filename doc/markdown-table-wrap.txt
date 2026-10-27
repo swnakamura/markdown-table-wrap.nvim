@@ -18,49 +18,17 @@ OVERVIEW                                      *markdown-table-wrap-overview*
 
 markdown-table-wrap.nvim renders Markdown pipe tables with wrapped cell
 content. It does not modify the source Markdown buffer. The default display
-mode is a full-document Reader. Source-position-preserving inline replacement
-and a floating preview remain available as optional modes.
-
-READER MODE
-
-Reader mode mirrors the document into a protected scratch buffer and replaces
-every supported top-level pipe table with real Unicode buffer lines. It never
-modifies the source Markdown buffer. With auto_preview enabled, the default
-reader.auto_open value "has_table" opens Reader only after a table is
-detected.
-Plain Markdown remains in Source. Set reader.auto_open to "always" to open
-Reader for every supported buffer.
-
-Unlike inline extmark replacement, reader mode is not layered over long raw
-table rows. Native wrap therefore cannot reveal source pipes or URLs beneath
-the rendered table.
-
-Default interaction:
-
-- Normal mode stays in Reader.
-- v/V/CTRL-V select real rendered lines. Yank keeps Reader active.
-- i/a/I/A/o/O switch to the corresponding source line for editing. Reader
-  reopens after InsertLeave.
-- :w, :wq, :x, and ZZ save the backing Markdown source directly. The rendered
-  Reader buffer is never written to disk; :wq then quits as usual.
-- |:MarkdownTableToggleReader| switches between Reader and Source.
-- |:MarkdownTableEditSource| leaves Reader and pauses automatic reopening.
-- gx in Reader opens the original URL under a rendered link. Source-buffer gx
-  is left untouched by default; see |markdown-table-wrap-map-gx|.
+mode is source-position-preserving inline replacement; a floating preview is
+available as an optional mode.
 
 VIEW CHOICE                                  *markdown-table-wrap-view-choice*
 
 Use Source for structural editing such as dd, Visual changes, moving rows, or
 changing table delimiters. Use Inline when editing the original buffer while
-keeping a rendered table layer visible. Use Reader for stable full-document
-reading; its i/a/o/e editing commands jump to the mapped Source line.
+keeping a rendered table layer visible.
 
-|:MarkdownTableToggleInline| switches between Source and Inline. From Reader
-it first returns to Source and then enables Inline. Press it again to clear
-Inline and leave Source visible.
-
-To copy original Markdown syntax rather than the rendered table, toggle to
-Source first and use Visual mode there.
+|:MarkdownTableToggleInline| switches between Source and Inline. Press it
+again to clear Inline and leave Source visible.
 
 When optional inline mode is selected, complete-table rendering remains the
 default and viewport slicing remains disabled.
@@ -109,26 +77,15 @@ Example LazyVim key bindings:
 >
   keys = {
     {
-      "<leader>mr",
-      "<cmd>MarkdownTableToggleReader<cr>",
-      desc = "Toggle Markdown reader/source",
-    },
-    {
       "<leader>mi",
       "<cmd>MarkdownTableToggleInline<cr>",
       desc = "Toggle Markdown table inline view",
     },
-    {
-      "<leader>me",
-      "<cmd>MarkdownTableEditSource<cr>",
-      desc = "Edit Markdown source",
-    },
   }
 <
 
-ToggleReader is bidirectional. EditSource is one-way and pauses automatic
-reopening until Reader is explicitly opened again. ToggleInline selects Inline
-for the current buffer's editing session without changing global setup.
+ToggleInline selects Inline for the current buffer's editing session without
+changing global setup.
 
 ==============================================================================
 COMMANDS                                      *markdown-table-wrap-commands*
@@ -145,23 +102,10 @@ COMMANDS                                      *markdown-table-wrap-commands*
 :MarkdownTableFloatPreview
     Render the table under the cursor in a floating window.
 
-                                                   *:MarkdownTableReader*
-:MarkdownTableReader
-    Open the full Markdown document in the rendered reader.
-
-                                             *:MarkdownTableToggleReader*
-:MarkdownTableToggleReader
-    Switch the current window between Reader and Source. Leaving Reader pauses
-    automatic reopening until this command is run again.
-
-                                               *:MarkdownTableEditSource*
-:MarkdownTableEditSource
-    Leave Reader, pause automatic reopening, and keep Source visible.
-
                                              *:MarkdownTableToggleInline*
 :MarkdownTableToggleInline
-    Switch between Source and Inline. From Reader, first return to Source and
-    then enable Inline. Press again to clear Inline and leave Source visible.
+    Switch between Source and Inline. Press again to clear Inline and leave
+    Source visible.
 
                                                   *:MarkdownTableTogglePreview*
 :MarkdownTableTogglePreview
@@ -181,13 +125,11 @@ COMMANDS                                      *markdown-table-wrap-commands*
 
                                             *:MarkdownTableDisableAutoPreview*
 :MarkdownTableDisableAutoPreview
-    Disable automatic table rendering for the current Source buffer. When run
-    in Reader, target its backing Source buffer.
+    Disable automatic table rendering for the current Source buffer.
 
                                              *:MarkdownTableToggleAutoPreview*
 :MarkdownTableToggleAutoPreview
-    Toggle automatic table rendering in the current buffer. When disabling it
-    from Reader, target its backing Source buffer.
+    Toggle automatic table rendering in the current buffer.
 
                                                        *:MarkdownTableStatus*
 :MarkdownTableStatus
@@ -280,14 +222,6 @@ Default setup:
     inline_wrap_scope = "cursor",
     inline_viewport_scrolling = false,
     quote_icon = "auto",
-    reader = {
-      auto_open = "has_table",
-      wrap = true,
-      linebreak = false,
-      breakindent = true,
-      conceallevel = 2,
-      concealcursor = "nvc",
-    },
     highlight_preset = "default",
     theme_dir = nil,
     themes = {},
@@ -333,20 +267,9 @@ fit_to_window~
     When necessary, columns may become narrower than min_col_width.
 
 preview_mode~
-    "inline" (default), "reader", or "float". Inline renders in place inside
-    the buffer you are editing, which stays modifiable and reveals the raw
-    source row under the cursor. Reader opens a separate, non-modifiable
-    rendered buffer and has to be requested explicitly.
-
-reader~
-    Behavior for the full-document reader. reader.auto_open accepts
-    "has_table" (the default) or "always". "has_table" automatically enters
-    Reader only after a table is detected, so plain Markdown stays in Source.
-    "always" enters Reader for every supported buffer.
-
-    By default ordinary Markdown in Reader uses wrap and breakindent, while
-    linebreak remains disabled. Table rows are already wrapped by the plugin
-    and stay inside the computed text width.
+    "inline" (default) or "float". Inline renders in place inside the buffer
+    you are editing, which stays modifiable and reveals the raw source row
+    under the cursor.
 
 inline_mode~
     "replace" hides source text and overlays rendered rows.
@@ -387,12 +310,10 @@ inline_wrap_scope~
 
 clear_on_visual~
     In inline mode, reveal source Markdown while selecting text and re-render
-    after leaving Visual mode. Reader mode selects real rendered lines and
-    stays active after yank.
+    after leaving Visual mode.
 
 auto_preview~
-    Automatically render supported buffers. In Reader mode, automatic opening
-    also follows reader.auto_open.
+    Automatically render supported buffers.
 
 render_all~
     Render all tables in the current Markdown buffer.
@@ -438,9 +359,8 @@ link~
 
 map_gx~                                    *markdown-table-wrap-map-gx*
     Opt into a buffer-local gx mapping for table links in Source buffers.
-    Defaults to false, leaving the user's existing mapping untouched. Reader
-    links remain directly openable. |:MarkdownTableOpenLink| can also be
-    mapped manually.
+    Defaults to false, leaving the user's existing mapping untouched.
+    |:MarkdownTableOpenLink| can also be mapped manually.
 
 extra_filetypes~
     List of additional filetypes to enable table rendering for. The default
@@ -477,9 +397,8 @@ get_buffer_config({bufnr})~      *markdown-table-wrap.get_buffer_config()*
     pass 0 for the current buffer.
 
 get_preview_mode({bufnr})~          *markdown-table-wrap.get_preview_mode()*
-    Return the effective "reader", "inline", or "float" mode for {bufnr}
-    without mutating global setup. Omit {bufnr} or pass 0 for the current
-    buffer.
+    Return the effective "inline" or "float" mode for {bufnr} without
+    mutating global setup. Omit {bufnr} or pass 0 for the current buffer.
 
 Example:
 >
@@ -575,14 +494,12 @@ LIMITATIONS                                *markdown-table-wrap-limitations*
 - Inline replacement uses virtual text and optional virtual lines. These are
   visual rows, not real buffer rows. Use |:MarkdownTableScrollDown| /
   |:MarkdownTableScrollUp| to page through the inline rendered slice, or use
-  |:MarkdownTableReader| / |:MarkdownTableFloatPreview| for a normal
-  scrollable preview buffer.
+  |:MarkdownTableFloatPreview| for a normal scrollable preview buffer.
 - Terminal and platform combinations can differ in how wrap, conceal, and
   virtual text interact. The default
   |markdown-table-wrap-inline-disable-wrap| setting exists to prevent
   concealed long source rows from leaking through below the rendered table on
-  some terminal setups. Reader mode avoids this extmark/wrap interaction
-  entirely.
+  some terminal setups.
 - Treesitter-aware table discovery is not implemented yet.
 - Container-prefixed tables nested inside lists are not implemented yet. Such
   container starts safely terminate a top-level table. Blockquoted tables are

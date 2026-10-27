@@ -92,7 +92,6 @@ end
 h.test("default setup renders in the user's own buffer and keeps it editable", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")
-  local reader = require("markdown-table-wrap.reader")
 
   h.with_buffer(table_lines, function(buf)
     vim.bo[buf].filetype = "markdown"
@@ -107,8 +106,6 @@ h.test("default setup renders in the user's own buffer and keeps it editable", f
 
     h.assert_eq("default preview mode is inline", plugin.config.preview_mode, "inline")
     h.assert_eq("no separate buffer is entered", vim.api.nvim_get_current_buf(), buf)
-    h.assert_false("no reader buffer is opened", reader.is_reader(vim.api.nvim_get_current_buf()))
-    h.assert_eq("the reader marker is absent", vim.b[buf].markdown_table_wrap_reader, nil)
     h.assert_true("the buffer stays modifiable", vim.bo[buf].modifiable)
     h.assert_eq("the buffer keeps its normal buftype", vim.bo[buf].buftype, "nofile")
     h.assert_true("inline rendering is active in the source buffer", inline.is_active(buf))
@@ -402,44 +399,6 @@ h.test("default setup keeps the table screen height constant across the cursor r
     end
 
     vim.wo.wrap = saved_wrap
-    inline.clear(buf)
-    plugin.state.inline_buf = nil
-  end)
-end)
-
-h.test("toggling the reader off returns to the default inline rendering", function()
-  local plugin = require("markdown-table-wrap")
-  local inline = require("markdown-table-wrap.inline")
-  local reader = require("markdown-table-wrap.reader")
-
-  plugin.setup({})
-
-  h.with_buffer(table_lines, function(buf)
-    vim.bo[buf].filetype = "markdown"
-    vim.api.nvim_win_set_cursor(0, { 5, 0 })
-    plugin.refresh_auto()
-    h.assert_true("inline rendering is active to begin with", inline.is_active(buf))
-
-    local reader_buf = plugin.toggle_reader()
-    h.assert_true("the reader opens on the first toggle", reader.is_reader(reader_buf))
-
-    h.assert_true("the reader closes on the second toggle", plugin.toggle_reader())
-    h.assert_eq("the source buffer is current again", vim.api.nvim_get_current_buf(), buf)
-    h.assert_false("the source is not left paused", plugin.state.paused_buffers[buf] == true)
-    h.assert_eq("the buffer returns to the configured mode", plugin.get_preview_mode(buf), "inline")
-
-    -- The round trip must actually restore the rendering, both by itself and
-    -- through the ordinary refresh path that a cursor move, scroll, or edit
-    -- goes through.
-    vim.wait(400, function()
-      return inline.is_active(buf)
-    end)
-    h.assert_true("the round trip re-renders the buffer", inline.is_active(buf))
-
-    inline.clear(buf)
-    plugin.refresh_auto()
-    h.assert_true("an ordinary refresh still renders the buffer", inline.is_active(buf))
-
     inline.clear(buf)
     plugin.state.inline_buf = nil
   end)
