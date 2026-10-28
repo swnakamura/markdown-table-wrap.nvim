@@ -17,7 +17,7 @@ upstream v1.0 (Reader-first); single upstream features are ported instead.
 | F: conceallevel raised locally and handed back without leaks (437fafd) | done |
 | G2: render_all = false drift after an edit that keeps the table text (changedtick in table_signature, 70f04b8) | done |
 | I: the transient misdrawing between an edit and the debounced refresh (80 ms by default) — dropped by the owner (Q3 answer, 2026-10-28: too small to be worth the complexity). | dropped |
-| J: the `Invalid 'line': out of range` error from CursorMoved/WinScrolled after `25G` `dgg` on a buffer ending with a table (tmp/manual/q3_dgg.md). Owner decision (Q4, 2026-10-28: option 1): when a recorded row lies outside the current buffer, skip re-anchoring and leave it to the next refresh; nothing else of the dropped Task I | next |
+| J: the `Invalid 'line': out of range` error from CursorMoved/WinScrolled after `25G` `dgg` on a buffer ending with a table (tmp/manual/q3_dgg.md). Owner decision (Q4, 2026-10-28: option 1): when a recorded row lies outside the current buffer, skip re-anchoring and leave it to the next refresh; nothing else of the dropped Task I | done: f9ea939 |
 | H: in Visual mode, show only the tables inside the selection raw (2c22107) | done |
 
 ## On hold
@@ -62,3 +62,4 @@ One line per item: origin — content — disposition (empty while open) — dat
 - H builder — a write whose BufWritePre hook edits the text (a formatter) makes the next Visual session show every table raw until the refresh; selecting per table there would need rows re-read from marks (dropped Task I) — — 2026-10-28
 - H review — Select mode has no suite test (probed correct: `gh` hides nothing, `v<C-g>` restores, `<C-g>` back hides) — — 2026-10-28
 - F review — auto_preview = false: manual render, then Visual mode leaves the table gone and the window raised — fixed: 2c22107 — 2026-10-28
+- J review — after `25G` `dgg` (or `:%d`), `<C-y>` before the refresh scrolls into the left-over block, and the window keeps topfill 1 after the refresh deleted it: one filler row above line 1 until the next scroll (possibly reachable before J by deleting a table at the buffer's top) — — 2026-10-28
