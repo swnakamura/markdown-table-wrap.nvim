@@ -137,6 +137,36 @@ for _, inline_mode in ipairs({ "replace", "insert" }) do
   end)
 end
 
+h.test("deleting a table that ends the buffer moves the cursor without errors before the refresh", function()
+  local plugin = require("markdown-table-wrap")
+  local inline = require("markdown-table-wrap.inline")
+  plugin.setup({ preview_mode = "inline", debounce_ms = 1 })
+
+  local lines = {}
+  for i = 1, 20 do
+    table.insert(lines, "p" .. i)
+  end
+  vim.list_extend(lines, { "| A | B |", "| --- | --- |", "| one | two |" })
+  h.with_buffer(lines, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.api.nvim_win_set_cursor(0, { 22, 0 })
+    plugin.refresh_auto()
+    h.assert_true("the table is rendered", inline.is_active(buf))
+
+    vim.cmd.normal({ "dgg", bang = true })
+    h.assert_deep_eq("dgg leaves one line", vim.api.nvim_buf_get_lines(buf, 0, -1, false), { "| one | two |" })
+    -- An autocmd callback's error is reported as a message, not raised.
+    vim.v.errmsg = ""
+    vim.api.nvim_exec_autocmds("CursorMoved", { buffer = buf })
+    vim.api.nvim_exec_autocmds("WinScrolled", { buffer = buf })
+    h.assert_eq("the cursor move and the scroll report no error", vim.v.errmsg, "")
+
+    vim.api.nvim_exec_autocmds("TextChanged", { buffer = buf })
+    h.drain_timers(1)
+    h.assert_true("the refresh clears the deleted table", not inline.is_active(buf))
+  end)
+end)
+
 h.test("interactive mode and auto choices stay buffer local", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")

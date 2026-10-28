@@ -504,10 +504,18 @@ function M.update_reveal(bufnr)
   local row = vim.api.nvim_win_get_cursor(0)[1] - 1
   local top = vim.fn.line("w0") - 1
   local bot = vim.fn.line("w$") - 1
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
 
   for _, run in ipairs(runs) do
     local entry, split = find_split(run, row)
     local first, last = run.tables[1], run.tables[#run.tables]
+
+    -- Not re-anchored: after a deletion (dgg from inside a table that ends
+    -- the buffer) the rows recorded at render time can lie past the end of
+    -- the buffer until the debounced refresh renders the new text.
+    if last.end_row >= line_count then
+      goto continue
+    end
 
     -- Relative line numbers are measured from the cursor row, so the blocks
     -- also go stale whenever the cursor changes lines. Refreshing them only
@@ -544,6 +552,8 @@ function M.update_reveal(bufnr)
       -- the cursor sat off-screen for several hundred ms.
       repair_view(bufnr)
     end
+
+    ::continue::
   end
 end
 
