@@ -16,7 +16,7 @@ upstream v1.0 (Reader-first); single upstream features are ported instead.
 | G1: adjacent tables drawn together, upper above lower (42c80dc) | done |
 | F: conceallevel raised locally and handed back without leaks (437fafd) | done |
 | G2: render_all = false drift after an edit that keeps the table text (changedtick in table_signature, 70f04b8) | done |
-| I: between an edit and the debounced refresh, update_reveal re-anchors blocks with render-time row numbers (header drawn under the table while typing above it; `Invalid 'line': out of range` after `dgg`). The owner's Q1 choice (option B, 2026-10-28) was based on a wrong claim: the feasibility review (tmp/feas-IH/) showed B leaves the raw header visible after `o` above a table and makes the whole table vanish on a cursor move after any edit. Waiting for the owner's answer to QUESTIONS.md Q3 (switch to option C: re-read each table's rows from its conceal marks) | waiting for Q3 |
+| I: the transient misdrawing between an edit and the debounced refresh (80 ms by default) — dropped by the owner (Q3 answer, 2026-10-28: too small to be worth the complexity). Whether to fix only the `Invalid 'line': out of range` error after `dgg` is QUESTIONS.md Q4 | dropped; Q4 open |
 | H: in Visual mode, show only the tables inside the selection raw (until I lands, an edit not yet refreshed when Visual mode starts falls back to clearing the whole buffer, as today) | next |
 
 ## On hold
