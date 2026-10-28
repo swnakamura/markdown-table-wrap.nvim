@@ -18,10 +18,6 @@ Inline rendering with the default `opts = {}`. The cursor is on the third row, w
 
 ![Inline table rendering with the cursor row revealed](docs/inline-cursor-row.png)
 
-Floating preview for long table reading:
-
-![Floating long table preview](docs/03-floating-long-table.png)
-
 ## Features
 
 - Automatic Markdown-only rendering; commands are optional controls.
@@ -576,8 +572,7 @@ markdown-table-wrap.nvim/
 │   ├── markdown-table-wrap.txt
 │   └── tags
 ├── docs/
-│   ├── inline-cursor-row.png
-│   └── 03-floating-long-table.png
+│   └── inline-cursor-row.png
 ├── lua/
 │   └── markdown-table-wrap/
 │       ├── export.lua

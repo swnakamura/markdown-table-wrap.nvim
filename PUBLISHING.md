@@ -223,7 +223,6 @@ the two intentional default changes prominently:
 The real media currently tracked in this repository are:
 
 - `docs/inline-cursor-row.png`
-- `docs/03-floating-long-table.png`
 
 Use only those files unless new media is committed and reviewed first. The
 plugin itself needs no compiled archive or binary release asset; lazy.nvim
