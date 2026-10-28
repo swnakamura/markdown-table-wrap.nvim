@@ -24,10 +24,9 @@ local defaults = {
   auto_preview_in_insert = true,
   clear_on_cursor_leave = true,
   clear_on_insert = false,
-  -- Clear in visual mode so the selection is visible on raw source lines
-  -- (rows hidden behind virtual lines cannot show the selection highlight).
-  -- The clear keeps window options so conceal appearance doesn't flicker
-  -- buffer-wide.
+  -- Show the tables the Visual selection reaches as raw source lines, so the
+  -- selection is visible on them (rows hidden behind virtual lines cannot
+  -- show the selection highlight).
   clear_on_visual = true,
   debounce_ms = 80,
   overlay_priority = 10000,
@@ -430,7 +429,9 @@ function M.refresh_auto(opts)
   local table_info = parser.parse_at_cursor(bufnr, cursor[1])
 
   if not table_info then
-    if config.clear_on_cursor_leave ~= false then
+    -- Not kept when nothing is rendered: after Visual mode cleared the
+    -- tables, the windows would stay at the raised conceallevel.
+    if config.clear_on_cursor_leave ~= false or not inline.is_active(bufnr) then
       inline.clear(bufnr)
       if M.state.inline_buf == bufnr then
         M.state.inline_buf = nil
@@ -563,6 +564,13 @@ function M.toggle_auto_preview()
   end
 end
 
+-- The 0-based rows the Visual selection spans, whatever its kind. Not the '<
+-- and '> marks, which are set only when Visual mode ends.
+local function selected_rows()
+  local start, cursor = vim.fn.line("v") - 1, vim.fn.line(".") - 1
+  return math.min(start, cursor), math.max(start, cursor)
+end
+
 local function create_autocmds()
   if M.state.augroup then
     vim.api.nvim_del_augroup_by_id(M.state.augroup)
@@ -578,6 +586,9 @@ local function create_autocmds()
       end
 
       require("markdown-table-wrap.inline").attach_window(args.buf)
+      if M.state.visual_buffers[args.buf] and vim.api.nvim_get_mode().mode:match("^[vV\22]") then
+        require("markdown-table-wrap.inline").show_raw(args.buf, selected_rows())
+      end
       -- Reveal the raw source line under the cursor, restore the row left
       require("markdown-table-wrap.inline").update_reveal(args.buf)
 
@@ -645,24 +656,41 @@ local function create_autocmds()
     group = M.state.augroup,
     callback = function(args)
       local bufnr = args.buf
-      if not is_markdown_buffer(bufnr) or config_for_buffer(bufnr).clear_on_visual == false then
+      if not is_markdown_buffer(bufnr) then
+        return
+      end
+      local config = config_for_buffer(bufnr)
+      if config.clear_on_visual == false then
         return
       end
 
+      local inline = require("markdown-table-wrap.inline")
       local mode = vim.api.nvim_get_mode().mode
       local visual = mode:match("^[vV\22]") ~= nil
 
       if visual then
-        -- keep_window: leave conceallevel in place so concealed markup
-        -- outside tables doesn't flicker while toggling visual mode
-        require("markdown-table-wrap.inline").clear(bufnr, { keep_window = true })
-        if M.state.inline_buf == bufnr then
-          M.state.inline_buf = nil
+        if not inline.show_raw(bufnr, selected_rows()) then
+          -- keep_window: leave conceallevel in place so concealed markup
+          -- outside tables doesn't flicker while toggling visual mode
+          inline.clear(bufnr, { keep_window = true })
+          if M.state.inline_buf == bufnr then
+            M.state.inline_buf = nil
+          end
+          M.state.last_signature[bufnr] = nil
         end
-        M.state.last_signature[bufnr] = nil
         M.state.visual_buffers[bufnr] = true
       elseif M.state.visual_buffers[bufnr] then
         M.state.visual_buffers[bufnr] = nil
+        inline.show_raw(bufnr)
+        -- Not left to the refresh, which never comes: the windows would stay
+        -- at the raised conceallevel with nothing rendered.
+        if not inline.is_active(bufnr) and (not config.auto_preview or M.state.paused_buffers[bufnr]) then
+          inline.clear(bufnr)
+          if M.state.inline_buf == bufnr then
+            M.state.inline_buf = nil
+          end
+          M.state.last_signature[bufnr] = nil
+        end
         M.schedule_refresh({ bufnr = bufnr, winid = vim.api.nvim_get_current_win(), silent = true })
       end
     end,
@@ -701,6 +729,20 @@ local function create_autocmds()
         end
         M.state.last_signature[args.buf] = nil
       end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("BufWritePre", {
+    group = M.state.augroup,
+    callback = function(args)
+      require("markdown-table-wrap.inline").before_write(args.buf)
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("BufWritePost", {
+    group = M.state.augroup,
+    callback = function(args)
+      require("markdown-table-wrap.inline").after_write(args.buf)
     end,
   })
 

@@ -57,14 +57,10 @@ local function raw_height(lnum)
   return measured.all - (measured.fill or 0)
 end
 
--- Type keys for real, so mode changes and the InsertEnter / CursorMovedI /
--- TextChangedI autocommands fire the way they do for a user. "x" runs the
--- keys immediately with :normal! semantics, which also means insert mode ends
--- once the fed keys run out -- state that has to be observed *during* insert
--- is captured from an autocommand instead (see insert_snapshot).
-local function feed(keys)
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), "x", false)
-end
+-- Insert mode ends once the keys fed with h.feed run out -- state that has to
+-- be observed *during* insert is captured from an autocommand instead (see
+-- insert_snapshot).
+local feed = h.feed
 
 -- Feed `keys` and return whatever `capture` collects the last time `event`
 -- fires while they are being typed. Under :normal! semantics CursorMovedI and

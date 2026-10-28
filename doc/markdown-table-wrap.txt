@@ -256,8 +256,9 @@ inline_mode~
     table's last row with inline_position = "below".
 
 clear_on_visual~
-    In inline mode, reveal source Markdown while selecting text and re-render
-    after leaving Visual mode.
+    In inline mode, show the tables that the lines of the Visual selection
+    reach as source Markdown while selecting, keeping every other table
+    rendered, and render them again after leaving Visual mode.
 
 auto_preview~
     Automatically render supported buffers.

@@ -15,6 +15,11 @@ local active_configs = {}
 -- comment above show_replace_aligned). Declared here because the window
 -- option handling below has to know about it.
 local aligned_tables = {}
+-- renderings[bufnr]: { tick = the changedtick the rendering was made at,
+-- tables = every table it rendered, in source order, groups = in replace mode
+-- the runs of all those tables, each with the runs currently laid out from its
+-- tables not shown raw }. See M.show_raw.
+local renderings = {}
 
 local function normalize_bufnr(bufnr)
   if not bufnr or bufnr == 0 then
@@ -375,16 +380,20 @@ local function numbered_lines(entry, column)
   return entry.numbered or entry.flat
 end
 
--- (Re-)attach the rendered virtual-line blocks of one run of tables. entry is
--- the table holding the cursor row and split the row's 1-based group index in
--- it, or both are nil when the cursor is outside the run.
-local function set_run_blocks(bufnr, run, entry, split)
+local function delete_run_blocks(bufnr, run)
   for _, key in ipairs({ "above_id", "below_id" }) do
     if run[key] then
       vim.api.nvim_buf_del_extmark(bufnr, namespace, run[key])
       run[key] = nil
     end
   end
+end
+
+-- (Re-)attach the rendered virtual-line blocks of one run of tables. entry is
+-- the table holding the cursor row and split the row's 1-based group index in
+-- it, or both are nil when the cursor is outside the run.
+local function set_run_blocks(bufnr, run, entry, split)
+  delete_run_blocks(bufnr, run)
 
   local first, last = run.tables[1], run.tables[#run.tables]
   local winid = find_window(bufnr)
@@ -455,6 +464,33 @@ local function set_run_blocks(bufnr, run, entry, split)
   run.entry, run.split = entry, split
 end
 
+-- The table of run holding row and the row's 1-based group index in it, or
+-- nil when row is outside the run.
+local function find_split(run, row)
+  for _, member in ipairs(run.tables) do
+    if row >= member.start_row and row <= member.end_row then
+      return member, row - member.start_row + 1
+    end
+  end
+end
+
+-- Brings the cursor back on screen after Neovim normalized a view whose
+-- topline was concealed again. A plain view assignment: normal-mode scroll
+-- commands are unusable here (they clamp or drag the off-screen cursor back
+-- into the table). topline = cursor line yields a stable view with a few rows
+-- of the table's tail auto-filled above the cursor.
+local function repair_view(bufnr)
+  vim.schedule(function()
+    if vim.api.nvim_get_current_buf() ~= bufnr then
+      return
+    end
+
+    if vim.fn.winline() > vim.api.nvim_win_get_height(0) then
+      vim.fn.winrestview({ topline = vim.api.nvim_win_get_cursor(0)[1] })
+    end
+  end)
+end
+
 -- Re-split the virtual-line blocks around the cursor row. Neovim itself
 -- reveals the raw source line under the cursor (conceal_lines is inactive on
 -- the cursor line), so no per-row extmark juggling is needed here.
@@ -470,12 +506,7 @@ function M.update_reveal(bufnr)
   local bot = vim.fn.line("w$") - 1
 
   for _, run in ipairs(runs) do
-    local entry, split = nil, nil
-    for _, member in ipairs(run.tables) do
-      if row >= member.start_row and row <= member.end_row then
-        entry, split = member, row - member.start_row + 1
-      end
-    end
+    local entry, split = find_split(run, row)
     local first, last = run.tables[1], run.tables[#run.tables]
 
     -- Relative line numbers are measured from the cursor row, so the blocks
@@ -510,23 +541,13 @@ function M.update_reveal(bufnr)
       -- block above it). The moment the cursor leaves, that row is
       -- concealed again, the topline becomes invalid, and Neovim normalizes
       -- the view upward: the viewport visibly jumped above the table and
-      -- the cursor sat off-screen for several hundred ms. Repair it with a
-      -- plain view assignment; normal-mode scroll commands are unusable
-      -- here (they clamp or drag the off-screen cursor back into the
-      -- table). topline = cursor line yields a stable view with a few rows
-      -- of the table's tail auto-filled above the cursor.
-      vim.schedule(function()
-        if vim.api.nvim_get_current_buf() ~= bufnr then
-          return
-        end
-
-        if vim.fn.winline() > vim.api.nvim_win_get_height(0) then
-          vim.fn.winrestview({ topline = vim.api.nvim_win_get_cursor(0)[1] })
-        end
-      end)
+      -- the cursor sat off-screen for several hundred ms.
+      repair_view(bufnr)
     end
   end
 end
+
+local conceal_row = { conceal_lines = "", right_gravity = false }
 
 -- Row-anchored replace mode: each source line corresponds to its rendered
 -- row; the line under the cursor shows (and edits) as plain soft-wrapped
@@ -584,9 +605,15 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
     group_lines[index] = info.content_last - info.content_start + 1
   end
 
+  local marks = {}
+  for row = start_row, end_row do
+    table.insert(marks, { row, conceal_row })
+  end
+
   local entry = {
     start_row = start_row,
     end_row = end_row,
+    marks = marks,
     flat = flat,
     flat_lnums = flat_lnums,
     group_index = group_index,
@@ -601,15 +628,30 @@ local function show_replace_aligned(bufnr, table_info, config, rendered)
   return entry
 end
 
--- Groups the tables of bufnr shown in replace mode (entries, in source order)
--- into runs, hides their source rows and hangs each run's blocks. Not done
--- per table as it is shown: a run would then be laid out again for every
--- table that joins it.
-local function lay_out_runs(bufnr, entries)
-  if #entries == 0 then
+-- Sets the marks of one table's entry outside its run's blocks, unless they
+-- are set already.
+local function draw_marks(bufnr, entry)
+  if entry.ids then
     return
   end
+  entry.ids = {}
+  for _, mark in ipairs(entry.marks) do
+    table.insert(entry.ids, vim.api.nvim_buf_set_extmark(bufnr, namespace, mark[1], 0, mark[2]))
+  end
+end
 
+local function undraw_marks(bufnr, entry)
+  for _, id in ipairs(entry.ids or {}) do
+    vim.api.nvim_buf_del_extmark(bufnr, namespace, id)
+  end
+  entry.ids = nil
+end
+
+-- Groups the tables of bufnr shown in replace mode (entries, in source order)
+-- into runs, hides their source rows and hangs each run's blocks, split around
+-- row if given; returns the runs. Not done per table as it is shown: a run
+-- would then be laid out again for every table that joins it.
+local function lay_out_runs(bufnr, entries, row)
   local runs = {}
   for _, entry in ipairs(entries) do
     local run = runs[#runs]
@@ -619,19 +661,33 @@ local function lay_out_runs(bufnr, entries)
     end
     table.insert(run.tables, entry)
   end
-  aligned_tables[bufnr] = runs
 
   for _, run in ipairs(runs) do
     for _, entry in ipairs(run.tables) do
-      for row = entry.start_row, entry.end_row do
-        vim.api.nvim_buf_set_extmark(bufnr, namespace, row, 0, {
-          conceal_lines = "",
-          right_gravity = false,
-        })
-      end
+      draw_marks(bufnr, entry)
     end
-    set_run_blocks(bufnr, run, nil, nil)
+    if row then
+      set_run_blocks(bufnr, run, find_split(run, row))
+    else
+      set_run_blocks(bufnr, run, nil, nil)
+    end
   end
+  return runs
+end
+
+-- Keeps the tables of bufnr's new rendering (entries, in source order) for
+-- M.show_raw and, in replace mode, lays out their runs.
+local function keep_rendering(bufnr, entries, config)
+  local rendering = { tick = vim.api.nvim_buf_get_changedtick(bufnr), tables = entries }
+  if config.inline_mode ~= "insert" and #entries > 0 then
+    local runs = lay_out_runs(bufnr, entries)
+    aligned_tables[bufnr] = runs
+    rendering.groups = {}
+    for _, run in ipairs(runs) do
+      table.insert(rendering.groups, { tables = run.tables, runs = { run } })
+    end
+  end
+  renderings[bufnr] = rendering
 end
 
 local function show_replace(bufnr, table_info, config, rendered)
@@ -656,21 +712,28 @@ local function show_insert(bufnr, table_info, config, rendered)
   local above = config.inline_position ~= "below"
   local target_line = above and math.max(table_info.start_lnum - 1, 0) or table_info.end_lnum - 1
 
-  vim.api.nvim_buf_set_extmark(bufnr, namespace, target_line, 0, {
-    virt_lines = virt_lines(rendered.line_objects or rendered.lines, rendered.quote),
-    virt_lines_above = above,
-    right_gravity = false,
-    priority = 200,
-  })
+  local marks = {
+    {
+      target_line,
+      {
+        virt_lines = virt_lines(rendered.line_objects or rendered.lines, rendered.quote),
+        virt_lines_above = above,
+        right_gravity = false,
+        priority = 200,
+      },
+    },
+  }
 
   if config.dim_source ~= false then
+    local dim = { line_hl_group = "MarkdownTableWrapSource", priority = 100 }
     for line = table_info.start_lnum - 1, table_info.end_lnum - 1 do
-      vim.api.nvim_buf_set_extmark(bufnr, namespace, line, 0, {
-        line_hl_group = "MarkdownTableWrapSource",
-        priority = 100,
-      })
+      table.insert(marks, { line, dim })
     end
   end
+
+  local entry = { start_row = table_info.start_lnum - 1, end_row = table_info.end_lnum - 1, marks = marks }
+  draw_marks(bufnr, entry)
+  return entry
 end
 
 -- opts.keep_window: skip restoring window options (conceallevel). Used for
@@ -687,6 +750,7 @@ function M.clear(bufnr, opts)
   active_buffers[bufnr] = nil
   active_configs[bufnr] = nil
   aligned_tables[bufnr] = nil
+  renderings[bufnr] = nil
   if not opts.keep_window then
     if raised_buffers[bufnr] then
       restore_render_for_buffer(bufnr)
@@ -721,14 +785,12 @@ function M.is_active(bufnr)
   return #marks > 0
 end
 
--- Returns the rendering and, in replace mode, the table's entry for
--- lay_out_runs.
+-- Returns the rendering and the table's entry for keep_rendering.
 local function show_one(bufnr, table_info, config)
   local rendered = render.render_table(table_info, config)
 
   if config.inline_mode == "insert" then
-    show_insert(bufnr, table_info, config, rendered)
-    return rendered, nil
+    return rendered, show_insert(bufnr, table_info, config, rendered)
   end
 
   return rendered, show_replace(bufnr, table_info, config, rendered)
@@ -739,7 +801,7 @@ function M.show(bufnr, table_info, config)
   M.clear(bufnr)
 
   local rendered, entry = show_one(bufnr, table_info, config)
-  lay_out_runs(bufnr, entry and { entry } or {})
+  keep_rendering(bufnr, { entry }, config)
   active_buffers[bufnr] = true
   active_configs[bufnr] = config
   if config.inline_mode == "replace" then
@@ -757,11 +819,9 @@ function M.show_many(bufnr, tables, config)
   for _, table_info in ipairs(tables) do
     local table_rendered, entry = show_one(bufnr, table_info, config)
     table.insert(rendered, table_rendered)
-    if entry then
-      table.insert(entries, entry)
-    end
+    table.insert(entries, entry)
   end
-  lay_out_runs(bufnr, entries)
+  keep_rendering(bufnr, entries, config)
 
   active_buffers[bufnr] = #tables > 0
   active_configs[bufnr] = config
@@ -770,6 +830,102 @@ function M.show_many(bufnr, tables, config)
   end
   M.update_reveal(bufnr)
   return rendered
+end
+
+-- Shows raw every table of bufnr's rendering whose rows overlap first_row to
+-- last_row (0-based) and every other table rendered; with no rows given, every
+-- table rendered. Returns false, changing nothing, when there is no rendering
+-- or the buffer has changed since it was made: its recorded rows are then no
+-- longer where its marks are.
+function M.show_raw(bufnr, first_row, last_row)
+  bufnr = normalize_bufnr(bufnr)
+  local rendering = renderings[bufnr]
+  if not rendering or rendering.tick ~= vim.api.nvim_buf_get_changedtick(bufnr) then
+    return false
+  end
+
+  local function raw(entry)
+    return first_row ~= nil and entry.end_row >= first_row and entry.start_row <= last_row
+  end
+
+  if not rendering.groups then
+    for _, entry in ipairs(rendering.tables) do
+      if raw(entry) then
+        undraw_marks(bufnr, entry)
+      else
+        draw_marks(bufnr, entry)
+      end
+    end
+    return true
+  end
+
+  -- Not every run laid out again: a small table selected next to a long one
+  -- would cost as much as rendering the long one. Not laid out unsplit for
+  -- update_reveal to split around the cursor: a long table restored under
+  -- the cursor would be laid out twice.
+  local row = vim.api.nvim_get_current_buf() == bufnr and vim.api.nvim_win_get_cursor(0)[1] - 1 or nil
+  local changed, runs = false, {}
+  for _, group in ipairs(rendering.groups) do
+    local stale = false
+    for _, entry in ipairs(group.tables) do
+      stale = stale or raw(entry) == (entry.ids ~= nil)
+    end
+
+    if stale then
+      changed = true
+      local shown = {}
+      for _, run in ipairs(group.runs) do
+        delete_run_blocks(bufnr, run)
+      end
+      for _, entry in ipairs(group.tables) do
+        if raw(entry) then
+          undraw_marks(bufnr, entry)
+        else
+          table.insert(shown, entry)
+        end
+      end
+      group.runs = lay_out_runs(bufnr, shown, row)
+    end
+    vim.list_extend(runs, group.runs)
+  end
+
+  if changed then
+    aligned_tables[bufnr] = runs
+    M.update_reveal(bufnr)
+    -- Raw rows under the topline are concealed again when their table is
+    -- rendered again, as when the cursor leaves a table.
+    repair_view(bufnr)
+  end
+  return true
+end
+
+-- A write that resets 'modified' moves the changedtick by one without
+-- changing the text; the rendering's recorded rows still hold across it.
+-- before_write and after_write run at BufWritePre and BufWritePost.
+function M.before_write(bufnr)
+  bufnr = normalize_bufnr(bufnr)
+  local rendering = renderings[bufnr]
+  if rendering then
+    rendering.write_tick = vim.api.nvim_buf_get_changedtick(bufnr)
+    rendering.write_modified = vim.bo[bufnr].modified
+  end
+end
+
+function M.after_write(bufnr)
+  bufnr = normalize_bufnr(bufnr)
+  local rendering = renderings[bufnr]
+  if not rendering or not rendering.write_tick then
+    return
+  end
+  -- Not "moved by at most one": a write that keeps 'modified' (:w other.md)
+  -- moves nothing itself, so one edit around it (a formatter on BufWritePre)
+  -- would pass for the write.
+  local reset = rendering.write_modified and not vim.bo[bufnr].modified
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  if rendering.tick == rendering.write_tick and tick == rendering.write_tick + (reset and 1 or 0) then
+    rendering.tick = tick
+  end
+  rendering.write_tick, rendering.write_modified = nil, nil
 end
 
 -- shown: bufnr has just been displayed in the current window (BufWinEnter).

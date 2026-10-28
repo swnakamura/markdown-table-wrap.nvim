@@ -450,9 +450,10 @@ end
 
 -- Runs fn(win, buf) with a table rendered in a new window whose conceallevels
 -- were set to `levels` before the rendering, with :setlocal and :setglobal.
--- `config` is merged into the setup options. Every window and buffer the test
--- opens is closed again, also when it fails.
-local function with_rendered_window(levels, fn, config)
+-- `config` is merged into the setup options; `lines`, if given, replaces the
+-- table as the buffer's text. Every window and buffer the test opens is closed
+-- again, also when it fails.
+local function with_rendered_window(levels, fn, config, lines)
   local plugin = require("markdown-table-wrap")
   plugin.setup(vim.tbl_extend("force", {
     auto_preview = false,
@@ -467,7 +468,7 @@ local function with_rendered_window(levels, fn, config)
   local ok, err = pcall(function()
     vim.cmd("split")
     local win = vim.api.nvim_get_current_win()
-    local buf = new_markdown_buffer(table_lines)
+    local buf = new_markdown_buffer(lines or table_lines)
     vim.api.nvim_win_set_buf(win, buf)
     vim.cmd("setglobal conceallevel=" .. levels[2])
     vim.cmd("setlocal conceallevel=" .. levels[1])
@@ -819,6 +820,58 @@ h.test("a clear after a Visual mode clear still hands the conceallevel back", fu
     require("markdown-table-wrap").close_preview()
     h.assert_deep_eq("the clear after it hands the user's level back", conceallevels(win), { 1, 1 })
   end)
+end)
+
+local table_and_prose = { table_lines[1], table_lines[2], table_lines[3], "", "outro" }
+
+h.test("Visual mode with auto_preview off ends rendered or at the user's conceallevel", function()
+  with_rendered_window({ 0, 0 }, function(win, buf)
+    local inline = require("markdown-table-wrap.inline")
+    h.feed("V")
+    h.feed("<Esc>")
+    h.assert_true("leaving Visual mode renders the selected table again", inline.is_active(buf))
+    h.assert_deep_eq("the rendered window keeps the raised level", conceallevels(win), { 2, 0 })
+
+    -- Visual mode over an edit made since the rendering clears everything.
+    h.feed("Gx")
+    h.feed("ggV")
+    h.feed("<Esc>")
+    h.assert_false("nothing is rendered after Visual mode", inline.is_active(buf))
+    h.assert_deep_eq("the window gets the user's level back", conceallevels(win), { 0, 0 })
+  end, nil, table_and_prose)
+end)
+
+h.test("Visual mode out of a table kept on leave ends rendered or at the user's conceallevel", function()
+  with_rendered_window({ 0, 0 }, function(win, buf)
+    local inline = require("markdown-table-wrap.inline")
+    h.feed("V3j")
+    h.feed("<Esc>")
+    h.drain_timers(1)
+    h.assert_true("the table the cursor left is rendered again", inline.is_active(buf))
+    h.assert_deep_eq("the rendered window keeps the raised level", conceallevels(win), { 2, 0 })
+
+    -- Deleting the table leaves nothing that the refresh could render.
+    h.feed("ggVjjd")
+    h.drain_timers(1)
+    h.assert_false("nothing is rendered after the table is deleted", inline.is_active(buf))
+    h.assert_deep_eq("the window gets the user's level back", conceallevels(win), { 0, 0 })
+  end, { auto_preview = true, render_all = false, clear_on_cursor_leave = false }, table_and_prose)
+end)
+
+h.test("Visual mode in a paused buffer ends at the user's conceallevel when nothing is left", function()
+  with_rendered_window({ 0, 0 }, function(win, buf)
+    local plugin = require("markdown-table-wrap")
+    local inline = require("markdown-table-wrap.inline")
+    plugin.close_preview()
+    -- A forced refresh renders in the paused buffer; automatic ones do not.
+    plugin.refresh_auto({ force = true })
+    h.assert_true("the forced refresh renders the table", inline.is_active(buf))
+
+    h.feed("ggVjjd")
+    h.drain_timers(1)
+    h.assert_false("nothing is rendered after the table is deleted", inline.is_active(buf))
+    h.assert_deep_eq("the window gets the user's level back", conceallevels(win), { 0, 0 })
+  end, { auto_preview = true }, table_and_prose)
 end)
 
 -- render_all both ways: one renders through show(), the other through

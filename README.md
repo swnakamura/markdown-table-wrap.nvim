@@ -303,7 +303,7 @@ Options:
 - `auto_preview_in_insert`: keep replacement rendering active while typing in Insert mode.
 - `clear_on_cursor_leave`: clear inline rendering when the cursor leaves a table or window.
 - `clear_on_insert`: reveal source Markdown while editing, then re-render on `InsertLeave`.
-- `clear_on_visual`: in inline mode, reveal source Markdown while selecting text, then re-render after leaving Visual mode.
+- `clear_on_visual`: in inline mode, show the tables that the lines of the Visual selection reach as source Markdown while selecting, keeping every other table rendered, then render them again after leaving Visual mode.
 - `debounce_ms`: delay before automatic refresh after movement or text changes.
 - `overlay_priority`: priority of the extmarks that carry the rendered table rows in Inline replace mode.
 - `inline_line_numbers`: draw the window's line numbers into the rendered table rows in row-anchored replace mode (virtual lines cannot receive native line numbers). Each source row's number appears on the first rendered line of that row, using the `LineNr` highlight. Shown only when the window has `'number'` or `'relativenumber'` set; with `'relativenumber'` the distance to the cursor row is shown and updates as the cursor moves. Default `true`.

@@ -864,3 +864,436 @@ h.test("quoted table navigation skips the quote marker", function()
   h.assert_eq("first quoted cell", ("> | ab | cd |"):sub(spans[1].start_col + 1, spans[1].end_col), "ab")
   h.assert_eq("second quoted cell", ("> | ab | cd |"):sub(spans[2].start_col + 1, spans[2].end_col), "cd")
 end)
+
+-- Renders `lines` under setup(config) with the cursor on line `lnum`, runs
+-- fn(buf) and clears the rendering again, leaving Visual mode first if fn
+-- failed in it.
+local function with_rendered(lines, lnum, config, fn)
+  local plugin = require("markdown-table-wrap")
+  plugin.setup(vim.tbl_extend("force", {
+    preview_mode = "inline",
+    debounce_ms = 0,
+    render_all = true,
+    auto_preview = true,
+  }, config))
+
+  h.with_buffer(lines, function(buf)
+    vim.bo[buf].filetype = "markdown"
+    vim.api.nvim_win_set_cursor(0, { lnum, 0 })
+    plugin.refresh_auto({ force = true })
+    local ok, err = pcall(fn, buf)
+    if vim.api.nvim_get_mode().mode ~= "n" then
+      h.feed("<Esc>")
+    end
+    require("markdown-table-wrap.inline").clear(buf)
+    if not ok then
+      error(err, 0)
+    end
+  end)
+end
+
+-- Moves in Visual mode the way a user does: the main loop fires CursorMoved
+-- after the move, which h.feed does not.
+local function move(buf, keys)
+  h.feed(keys)
+  vim.api.nvim_exec_autocmds("CursorMoved", { buffer = buf })
+end
+
+-- The screen lines of the current window from the top, as many as `expected`
+-- has, for comparing with it.
+local function screen_like(expected)
+  vim.cmd("redraw")
+  local screen = {}
+  for row = 1, #expected do
+    screen[row] = h.screen_line(row)
+  end
+  return screen
+end
+
+local two_tables = {
+  "intro",
+  "",
+  "| A | B |",
+  "| --- | --- |",
+  "| one | two |",
+  "",
+  "mid",
+  "",
+  "| C | D |",
+  "| --- | --- |",
+  "| three | four |",
+  "",
+  "outro",
+}
+local first_raw = { unpack(two_tables, 3, 5) }
+local second_raw = { unpack(two_tables, 9, 11) }
+local first_rendered = {
+  "╭──────────┬──────────╮",
+  "│ A        │ B        │",
+  "├──────────┼──────────┤",
+  "│ one      │ two      │",
+  "╰──────────┴──────────╯",
+}
+local second_rendered = {
+  "╭──────────┬──────────╮",
+  "│ C        │ D        │",
+  "├──────────┼──────────┤",
+  "│ three    │ four     │",
+  "╰──────────┴──────────╯",
+}
+-- The first table rendered with its last row, the cursor row, revealed.
+local first_revealed = { first_rendered[1], first_rendered[2], first_rendered[3], "| one | two |", first_rendered[5] }
+
+-- The screen of two_tables with each table drawn as the given lines.
+local function two_table_screen(first, second, outro)
+  local screen = { "intro", "" }
+  vim.list_extend(screen, first)
+  vim.list_extend(screen, { "", "mid", "" })
+  vim.list_extend(screen, second)
+  vim.list_extend(screen, { "", outro or "outro" })
+  return screen
+end
+
+h.test("Visual mode shows raw only the tables its lines reach, following the selection", function()
+  for _, keys in ipairs({ "v", "V", "<C-v>" }) do
+    with_rendered(two_tables, 5, {}, function(buf)
+      local label = keys .. ": "
+      h.feed(keys)
+      h.assert_deep_eq(
+        label .. "the table under the cursor is raw, the other one rendered",
+        screen_like(two_table_screen(first_raw, second_rendered)),
+        two_table_screen(first_raw, second_rendered)
+      )
+
+      move(buf, "4j")
+      h.assert_deep_eq(
+        label .. "a selection reaching the first row of the second table shows all of it raw",
+        screen_like(two_table_screen(first_raw, second_raw)),
+        two_table_screen(first_raw, second_raw)
+      )
+
+      move(buf, "4k")
+      h.assert_deep_eq(
+        label .. "shrinking the selection renders the second table again",
+        screen_like(two_table_screen(first_raw, second_rendered)),
+        two_table_screen(first_raw, second_rendered)
+      )
+
+      -- No timers drained: a refresh would render everything anyway.
+      h.feed("<Esc>")
+      h.assert_deep_eq(
+        label .. "leaving Visual mode renders both tables at once",
+        screen_like(two_table_screen(first_revealed, second_rendered)),
+        two_table_screen(first_revealed, second_rendered)
+      )
+    end)
+  end
+end)
+
+h.test("Visual mode keeps the other tables of an adjacent run drawn around a selected one", function()
+  local lines = {
+    "intro",
+    "",
+    "| E | F |",
+    "| --- | --- |",
+    "| five | six |",
+    "> | A | B |",
+    "> | --- | --- |",
+    "> | one | two |",
+    "> > | C | D |",
+    "> > | --- | --- |",
+    "> > | three | four |",
+  }
+  local rendered = {
+    {
+      "╭──────────┬──────────╮",
+      "│ E        │ F        │",
+      "├──────────┼──────────┤",
+      "│ five     │ six      │",
+      "╰──────────┴──────────╯",
+    },
+    {
+      "> ╭──────────┬──────────╮",
+      "> │ A        │ B        │",
+      "> ├──────────┼──────────┤",
+      "> │ one      │ two      │",
+      "> ╰──────────┴──────────╯",
+    },
+    {
+      "> > ╭──────────┬──────────╮",
+      "> > │ C        │ D        │",
+      "> > ├──────────┼──────────┤",
+      "> > │ three    │ four     │",
+      "> > ╰──────────┴──────────╯",
+    },
+  }
+
+  with_rendered(lines, 1, {}, function()
+    -- The middle row of each table in turn: the upper, the middle and the
+    -- lower member of the run.
+    for selected, lnum in ipairs({ 4, 7, 10 }) do
+      local expected = { "intro", "" }
+      for member = 1, 3 do
+        local first = 3 * member
+        vim.list_extend(expected, member == selected and { unpack(lines, first, first + 2) } or rendered[member])
+      end
+
+      h.feed(lnum .. "GV")
+      h.assert_deep_eq("line " .. lnum .. " selected", screen_like(expected), expected)
+      h.feed("<Esc>")
+    end
+  end)
+end)
+
+h.test("Visual mode leaves every table rendered with clear_on_visual = false", function()
+  with_rendered(two_tables, 1, { clear_on_visual = false }, function(buf)
+    h.feed("V")
+    move(buf, "4j")
+    h.assert_deep_eq(
+      "both tables stay rendered, the cursor row revealed",
+      screen_like(two_table_screen(first_revealed, second_rendered)),
+      two_table_screen(first_revealed, second_rendered)
+    )
+  end)
+end)
+
+h.test("Visual mode takes only the selected tables' rendering away in Inline insert mode", function()
+  -- Inline insert mode draws the rendered table above its source rows.
+  local function screen(first_shown, second_shown)
+    local first, second = vim.list_extend({}, first_raw), vim.list_extend({}, second_raw)
+    if first_shown then
+      first = vim.list_extend(vim.list_extend({}, first_rendered), first_raw)
+    end
+    if second_shown then
+      second = vim.list_extend(vim.list_extend({}, second_rendered), second_raw)
+    end
+    -- Not past the window's last line.
+    return { unpack(two_table_screen(first, second), 1, 20) }
+  end
+
+  with_rendered(two_tables, 1, { inline_mode = "insert" }, function(buf)
+    h.assert_deep_eq("both tables are rendered", screen_like(screen(true, true)), screen(true, true))
+
+    h.feed("4GV")
+    h.assert_deep_eq("the selected table loses its rendering", screen_like(screen(false, true)), screen(false, true))
+
+    move(buf, "6j")
+    h.assert_deep_eq("so does a table the selection reaches", screen_like(screen(false, false)), screen(false, false))
+
+    move(buf, "6k")
+    h.assert_deep_eq(
+      "and gets it back when the selection leaves it",
+      screen_like(screen(false, true)),
+      screen(false, true)
+    )
+
+    h.feed("<Esc>")
+    h.assert_deep_eq("leaving Visual mode renders both at once", screen_like(screen(true, true)), screen(true, true))
+  end)
+end)
+
+h.test("leaving Visual mode with an edit leaves the edited table raw until the next refresh", function()
+  local plugin = require("markdown-table-wrap")
+  local first_edited = { "| A | B |", "| --- | --- |", "| ONE | TWO |" }
+  local first_edited_revealed =
+    { first_rendered[1], first_rendered[2], first_rendered[3], "| ONE | TWO |", first_rendered[5] }
+
+  for _, auto_preview in ipairs({ true, false }) do
+    with_rendered(two_tables, 5, { auto_preview = auto_preview }, function()
+      local label = "auto_preview = " .. tostring(auto_preview) .. ": "
+      h.feed("Vy")
+      h.assert_deep_eq(
+        label .. "a yank renders the table at once",
+        screen_like(two_table_screen(first_revealed, second_rendered)),
+        two_table_screen(first_revealed, second_rendered)
+      )
+
+      h.feed("VU")
+      h.assert_deep_eq(
+        label .. "an operator leaves the edited table raw and the other one rendered",
+        screen_like(two_table_screen(first_edited, second_rendered)),
+        two_table_screen(first_edited, second_rendered)
+      )
+
+      h.drain_timers(1)
+      local refreshed = auto_preview and first_edited_revealed or first_edited
+      h.assert_deep_eq(
+        label .. (auto_preview and "the refresh renders it" or "no refresh comes"),
+        screen_like(two_table_screen(refreshed, second_rendered)),
+        two_table_screen(refreshed, second_rendered)
+      )
+
+      plugin.refresh_auto({ force = true })
+      h.assert_deep_eq(
+        label .. "a manual refresh renders it",
+        screen_like(two_table_screen(first_edited_revealed, second_rendered)),
+        two_table_screen(first_edited_revealed, second_rendered)
+      )
+    end)
+  end
+end)
+
+h.test("Visual mode started over an edit not yet refreshed shows every table raw until the refresh", function()
+  local all_raw = two_table_screen(first_raw, second_raw, "utro")
+  local all_rendered = two_table_screen(first_rendered, second_rendered, "utro")
+
+  with_rendered(two_tables, 1, {}, function()
+    -- The refresh the edit schedules has not run yet.
+    h.feed("Gxgg")
+    h.feed("V")
+    h.assert_deep_eq("every table is raw", screen_like(all_raw), all_raw)
+
+    h.feed("<Esc>")
+    h.drain_timers(1)
+    h.assert_deep_eq("the refresh renders them", screen_like(all_rendered), all_rendered)
+
+    h.feed("V")
+    h.assert_deep_eq("after the refresh only the selected tables are raw", screen_like(all_rendered), all_rendered)
+  end)
+end)
+
+h.test("leaving Visual mode keeps the cursor on screen when a tall table is rendered again", function()
+  local lines = { "intro", "", "| A | B |", "| --- | --- |" }
+  for row = 1, 40 do
+    table.insert(lines, "| a" .. row .. " | b |")
+  end
+  vim.list_extend(lines, { "", "| C | D |", "| --- | --- |", "| c1 | d |", "| c2 | d |" })
+
+  with_rendered(lines, 1, {}, function(buf)
+    -- From the tall table to the delimiter row of the short one below it, so
+    -- the window's top line is one of the tall table's raw rows. Not to the
+    -- last row: Neovim then keeps the cursor on screen by itself.
+    h.feed("10GV")
+    move(buf, "47G")
+    vim.cmd("redraw")
+    h.assert_true("the top line is a raw row of the tall table", vim.fn.line("w0") > 10)
+
+    h.feed("<Esc>")
+    vim.cmd("redraw")
+    h.drain_scheduled()
+    vim.cmd("redraw")
+    h.assert_true(
+      string.format("the cursor is on screen: window line %d of %d", vim.fn.winline(), vim.api.nvim_win_get_height(0)),
+      vim.fn.winline() <= vim.api.nvim_win_get_height(0)
+    )
+  end)
+end)
+
+-- Gives the scratch buffer a file to be written to; returns its path.
+local function writable(buf)
+  local path = vim.fn.tempname() .. ".md"
+  vim.bo[buf].buftype = ""
+  vim.api.nvim_buf_set_name(buf, path)
+  return path
+end
+
+h.test("a write since the rendering does not make Visual mode show every table raw", function()
+  local plugin = require("markdown-table-wrap")
+  local function screen(first, second, outro)
+    local lines = two_table_screen(first, second, outro)
+    lines[1] = "ntro"
+    return lines
+  end
+
+  with_rendered(two_tables, 1, {}, function(buf)
+    local path = writable(buf)
+    local ok, err = pcall(function()
+      h.feed("x")
+      plugin.refresh_auto()
+      vim.cmd("silent write")
+      h.feed("3GV")
+      h.assert_deep_eq(
+        "after the write only the selected table is raw",
+        screen_like(screen(first_raw, second_rendered)),
+        screen(first_raw, second_rendered)
+      )
+      h.feed("<Esc>")
+      h.drain_timers(1)
+
+      -- A change made while writing is a change like any other.
+      vim.api.nvim_create_autocmd("BufWritePre", {
+        buffer = buf,
+        once = true,
+        callback = function()
+          vim.api.nvim_buf_set_lines(buf, -2, -1, false, { "outro!" })
+        end,
+      })
+      vim.cmd("silent write")
+      h.feed("gg3GV")
+      h.assert_deep_eq(
+        "after a write that changed the text every table is raw",
+        screen_like(screen(first_raw, second_raw, "outro!")),
+        screen(first_raw, second_raw, "outro!")
+      )
+    end)
+    vim.fn.delete(path)
+    if not ok then
+      error(err, 0)
+    end
+  end)
+end)
+
+h.test("leaving Visual mode after a write keeps a manual rendering", function()
+  local plugin = require("markdown-table-wrap")
+  local header_revealed = { first_rendered[1], "| A | B |", first_rendered[3], first_rendered[4], first_rendered[5] }
+  local expected = two_table_screen(header_revealed, second_rendered)
+  expected[1] = "ntro"
+
+  with_rendered(two_tables, 1, { auto_preview = false }, function(buf)
+    local path = writable(buf)
+    local ok, err = pcall(function()
+      h.feed("x")
+      plugin.refresh_auto({ force = true })
+      vim.cmd("silent write")
+      h.feed("3GV")
+      h.feed("<Esc>")
+      h.assert_deep_eq("both tables are rendered after Visual mode", screen_like(expected), expected)
+
+      -- An edit the write follows is still not refreshed.
+      h.feed("Gx")
+      vim.cmd("silent write")
+      h.feed("ggV")
+      local all_raw = two_table_screen(first_raw, second_raw, "utro")
+      all_raw[1] = "ntro"
+      h.assert_deep_eq("after an unrefreshed edit and a write every table is raw", screen_like(all_raw), all_raw)
+    end)
+    vim.fn.delete(path)
+    if not ok then
+      error(err, 0)
+    end
+  end)
+end)
+
+h.test("a write to another file with an edit around it makes Visual mode show every table raw", function()
+  local plugin = require("markdown-table-wrap")
+  -- two_tables without its first line, which the edit deletes.
+  local all_raw = { unpack(two_tables, 2) }
+
+  for _, mode in ipairs({ "replace", "insert" }) do
+    with_rendered(two_tables, 1, { auto_preview = false, inline_mode = mode }, function(buf)
+      local path = writable(buf)
+      local other = vim.fn.tempname() .. ".md"
+      local ok, err = pcall(function()
+        plugin.refresh_auto({ force = true })
+        -- Created after setup, so it runs after the plugin's own BufWritePre.
+        vim.api.nvim_create_autocmd("BufWritePre", {
+          buffer = buf,
+          once = true,
+          callback = function()
+            vim.api.nvim_buf_set_lines(buf, 0, 1, false, {})
+          end,
+        })
+        -- Keeps 'modified', so the write itself moves no changedtick.
+        vim.cmd("silent write! " .. vim.fn.fnameescape(other))
+        h.assert_true(mode .. ": the buffer is still modified", vim.bo[buf].modified)
+        h.feed("8GV")
+        h.assert_deep_eq(mode .. ": every table is raw", screen_like(all_raw), all_raw)
+      end)
+      vim.fn.delete(path)
+      vim.fn.delete(other)
+      if not ok then
+        error(err, 0)
+      end
+    end)
+  end
+end)

@@ -64,6 +64,15 @@ function M.drain_scheduled()
   end, 1)
 end
 
+-- Types keys for real, so mode changes and the InsertEnter / CursorMovedI /
+-- TextChangedI autocommands fire the way they do for a user. "x" runs the
+-- keys immediately with :normal! semantics, which also means insert mode ends
+-- once the fed keys run out. CursorMoved does not fire for keys fed this way;
+-- a test fires it itself where the main loop would.
+function M.feed(keys)
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), "x", false)
+end
+
 -- The text drawn on screen line `row` of the current window's text area
 -- (number, sign and fold columns left out unless `gutter` is true), trailing
 -- blanks trimmed. Reads the grid as last drawn, so call :redraw first.
