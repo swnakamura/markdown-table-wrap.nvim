@@ -2,6 +2,8 @@
 
 A Neovim/LazyVim plugin for rendering Markdown pipe tables with wrapped cell content.
 
+This is a fork of [ice345/markdown-table-wrap.nvim](https://github.com/ice345/markdown-table-wrap.nvim). It keeps every table rendered in place and reveals only the row under the cursor as raw Markdown; upstream v1.0 went a different way (a separate Reader buffer), so install this repository, not upstream, to get the behavior described here.
+
 It does not modify the Markdown source buffer and does not fork or patch `render-markdown.nvim`. It provides two display modes: source-position-preserving inline rendering and a floating preview.
 
 ## Why
@@ -12,9 +14,9 @@ It does not modify the Markdown source buffer and does not fork or patch `render
 
 ## Screenshots
 
-Inline rendering in a Tokyo Night themed Markdown buffer:
+Inline rendering with the default `opts = {}`. The cursor is on the third row, which is shown as raw Markdown so it can be edited; the other rows stay rendered and wrap inside their cells:
 
-![Inline table rendering](docs/01-inline-tokyonight.png)
+![Inline table rendering with the cursor row revealed](docs/01-inline-tokyonight.png)
 
 Floating preview for long table reading:
 
@@ -33,7 +35,7 @@ Floating preview for long table reading:
 - Supports mixed Chinese, English, and Japanese display widths through `vim.api.nvim_strwidth`.
 - Keeps Markdown inline code spans such as `` `Rc<RefCell<T>>` `` and `` `notes/01-smart-pointers.md` `` intact.
 - Keeps pipes from splitting table cells when they occur inside matching code spans with arbitrary backtick-run lengths.
-- Prefers wrapping at spaces, `、`, `，`, `,`, `；`, `;`, and `/`.
+- Wraps CJK text between any two characters, as Japanese and Chinese typesetting does, keeping closing marks such as `。` and `」` off the start of a line and opening marks such as `「` off its end. English words and other non-CJK runs are broken only at spaces, `,`, `;`, and `/`, unless a word is wider than its column.
 - Renders a Unicode table inline in a replace-like mode.
 - Renders every table of a supported buffer inline by default, in place and without cursor focus.
 - Debounces cursor movement and text changes.
@@ -62,7 +64,7 @@ Floating preview for long table reading:
 ```lua
 return {
   {
-    "ice345/markdown-table-wrap.nvim",
+    "swnakamura/markdown-table-wrap.nvim",
     ft = { "markdown", "quarto", "rmd" },
     opts = {},
   },
@@ -80,7 +82,7 @@ Clone or place this directory somewhere on disk, then add:
 -- ~/.config/nvim/lua/plugins/markdown-table-wrap.lua
 return {
   {
-    dir = "~/Code/lazyvim-table/markdown-table-wrap.nvim",
+    dir = "~/path/to/markdown-table-wrap.nvim",
     ft = { "markdown", "quarto", "rmd" },
     opts = {
       max_width_ratio = 0.9,
@@ -327,7 +329,7 @@ require("markdown-table-wrap").setup({
 > ```lua
 > return {
 >   {
->     "ice345/markdown-table-wrap.nvim",
+>     "swnakamura/markdown-table-wrap.nvim",
 >     ft = { "markdown", "quarto", "rmd", "text" },
 >     opts = {
 >       extra_filetypes = { "text" },

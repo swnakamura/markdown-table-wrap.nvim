@@ -46,7 +46,7 @@ Example lazy.nvim / LazyVim spec:
 >
   return {
     {
-      "ice345/markdown-table-wrap.nvim",
+      "swnakamura/markdown-table-wrap.nvim",
       ft = { "markdown", "quarto", "rmd" },
       opts = {},
     },
@@ -57,7 +57,7 @@ For local development:
 >
   return {
     {
-      dir = "~/Code/lazyvim-table/markdown-table-wrap.nvim",
+      dir = "~/path/to/markdown-table-wrap.nvim",
       ft = { "markdown", "quarto", "rmd" },
       opts = {},
     },
@@ -310,7 +310,7 @@ extra_filetypes~
 >
       return {
         {
-          "ice345/markdown-table-wrap.nvim",
+          "swnakamura/markdown-table-wrap.nvim",
           ft = { "markdown", "quarto", "rmd", "text" },
           opts = {
             extra_filetypes = { "text" },
