@@ -16,7 +16,8 @@ upstream v1.0 (Reader-first); single upstream features are ported instead.
 | G1: adjacent tables drawn together, upper above lower (42c80dc) | done |
 | F: conceallevel raised locally and handed back without leaks (437fafd) | done |
 | G2: render_all = false drift after an edit that keeps the table text (changedtick in table_signature) | in progress |
-| H: in Visual mode, show only the tables inside the selection raw | next |
+| I: between an edit and the debounced refresh, update_reveal re-anchors blocks with render-time row numbers (header drawn under the table while typing above it; `Invalid 'line': out of range` after `dgg`). Owner decision (Q1, 2026-10-28): option B — do not re-anchor while the buffer's changedtick differs from the rendering's; the shifted rendering stays correct because the marks move with the text; residual: a table row split with `<CR>` stays partly hidden until the refresh | next |
+| H: in Visual mode, show only the tables inside the selection raw | after I |
 
 ## On hold
 
