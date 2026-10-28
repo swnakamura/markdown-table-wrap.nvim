@@ -63,3 +63,4 @@ One line per item: origin — content — disposition (empty while open) — dat
 - H review — Select mode has no suite test (probed correct: `gh` hides nothing, `v<C-g>` restores, `<C-g>` back hides) — — 2026-10-28
 - F review — auto_preview = false: manual render, then Visual mode leaves the table gone and the window raised — fixed: 2c22107 — 2026-10-28
 - J review — after `25G` `dgg` (or `:%d`), `<C-y>` before the refresh scrolls into the left-over block, and the window keeps topfill 1 after the refresh deleted it: one filler row above line 1 until the next scroll (possibly reachable before J by deleting a table at the buffer's top) — — 2026-10-28
+- Q2 (owner question) — how to shorten the builder/reviewer loop — dropped: the owner no longer needs an answer — 2026-10-28
