@@ -16,7 +16,8 @@ upstream v1.0 (Reader-first); single upstream features are ported instead.
 | G1: adjacent tables drawn together, upper above lower (42c80dc) | done |
 | F: conceallevel raised locally and handed back without leaks (437fafd) | done |
 | G2: render_all = false drift after an edit that keeps the table text (changedtick in table_signature, 70f04b8) | done |
-| I: the transient misdrawing between an edit and the debounced refresh (80 ms by default) — dropped by the owner (Q3 answer, 2026-10-28: too small to be worth the complexity). Whether to fix only the `Invalid 'line': out of range` error after `dgg` is QUESTIONS.md Q4 | dropped; Q4 open |
+| I: the transient misdrawing between an edit and the debounced refresh (80 ms by default) — dropped by the owner (Q3 answer, 2026-10-28: too small to be worth the complexity). | dropped |
+| J: the `Invalid 'line': out of range` error from CursorMoved/WinScrolled after `25G` `dgg` on a buffer ending with a table (tmp/manual/q3_dgg.md). Owner decision (Q4, 2026-10-28: option 1): when a recorded row lies outside the current buffer, skip re-anchoring and leave it to the next refresh; nothing else of the dropped Task I | after H |
 | H: in Visual mode, show only the tables inside the selection raw (until I lands, an edit not yet refreshed when Visual mode starts falls back to clearing the whole buffer, as today) | next |
 
 ## On hold
