@@ -4,7 +4,7 @@
 
 Markdown のテーブルを、長いセルを列の中で折り返して描画する Neovim プラグインです。
 
-このリポジトリは [ice345/markdown-table-wrap.nvim](https://github.com/ice345/markdown-table-wrap.nvim) の fork です。この fork はすべてのテーブルをその場で描画したまま、カーソルのある行だけを生の Markdown として表示します。
+このリポジトリは [ice345/markdown-table-wrap.nvim](https://github.com/ice345/markdown-table-wrap.nvim) の fork です。この fork はすべてのテーブルをその場で描画したまま、カーソルのある行だけを生の Markdown として表示します。カーソルがある行も含めて全てレンダリングされた状態で表示したい場合は、 `MarkdownTableFloatPreview` コマンドでそれ専用のウィンドウを開けます。
 
 ![カーソル行だけを生の Markdown で表示したテーブル](docs/inline-cursor-row.png)
 

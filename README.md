@@ -4,7 +4,7 @@ English | [日本語](README.ja.md)
 
 A Neovim plugin that renders Markdown tables with long cells wrapped inside their columns.
 
-This repository is a fork of [ice345/markdown-table-wrap.nvim](https://github.com/ice345/markdown-table-wrap.nvim). This fork keeps every table rendered in place and shows only the row under the cursor as raw Markdown.
+This repository is a fork of [ice345/markdown-table-wrap.nvim](https://github.com/ice345/markdown-table-wrap.nvim). This fork keeps every table rendered in place and shows only the row under the cursor as raw Markdown. If you want to render all the table, you can open a dedicated window with the `MarkdownTableFloatPreview` command.
 
 ![A table with only the cursor row shown as raw Markdown](docs/inline-cursor-row.png)
 
