@@ -395,6 +395,407 @@ h.test("closing a rendered window hands its conceallevel back before Neovim stor
   delete_buffer(buf_plain)
 end)
 
+-- A window's conceallevel as { :setlocal conceallevel?, :setglobal
+-- conceallevel? } show it in that window.
+local function conceallevels(win)
+  return {
+    vim.api.nvim_get_option_value("conceallevel", { scope = "local", win = win }),
+    vim.api.nvim_get_option_value("conceallevel", { scope = "global", win = win }),
+  }
+end
+
+-- Runs fn(win, buf) with a table rendered in a new window whose conceallevels
+-- were set to `levels` before the rendering, with :setlocal and :setglobal.
+-- `config` is merged into the setup options. Every window and buffer the test
+-- opens is closed again, also when it fails.
+local function with_rendered_window(levels, fn, config)
+  local plugin = require("markdown-table-wrap")
+  plugin.setup(vim.tbl_extend("force", {
+    auto_preview = false,
+    preview_mode = "inline",
+    render_all = true,
+    debounce_ms = 0,
+  }, config or {}))
+
+  local origin = vim.api.nvim_get_current_win()
+  local wins_before = vim.api.nvim_list_wins()
+  local bufs_before = vim.api.nvim_list_bufs()
+  local ok, err = pcall(function()
+    vim.cmd("split")
+    local win = vim.api.nvim_get_current_win()
+    local buf = new_markdown_buffer(table_lines)
+    vim.api.nvim_win_set_buf(win, buf)
+    vim.cmd("setglobal conceallevel=" .. levels[2])
+    vim.cmd("setlocal conceallevel=" .. levels[1])
+    plugin.refresh_auto({ bufnr = buf, winid = win, force = true })
+    h.assert_true("the table is rendered", require("markdown-table-wrap.inline").is_active(buf))
+    fn(win, buf)
+  end)
+
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if not vim.tbl_contains(wins_before, win) and vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
+  end
+  vim.api.nvim_set_current_win(origin)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if not vim.tbl_contains(bufs_before, buf) then
+      delete_buffer(buf)
+    end
+  end
+  if not ok then
+    error(err, 0)
+  end
+end
+
+local float_config = { relative = "editor", row = 1, col = 1, width = 20, height = 3 }
+
+-- Each open(buf) returns a window that shows buf at the level it copied from
+-- the rendered window, without the rendering having raised it there.
+for _, case in ipairs({
+  {
+    name = "a window opened with :split",
+    levels = { 1, 1 },
+    copied = { 2, 1 },
+    cleared = { 1, 1 },
+    open = function()
+      vim.cmd("split")
+      return vim.api.nvim_get_current_win()
+    end,
+  },
+  {
+    name = "a window opened with :vsplit",
+    levels = { 1, 1 },
+    copied = { 2, 1 },
+    cleared = { 1, 1 },
+    open = function()
+      vim.cmd("vsplit")
+      return vim.api.nvim_get_current_win()
+    end,
+  },
+  {
+    name = "a window opened with :tab split",
+    levels = { 1, 1 },
+    copied = { 2, 1 },
+    cleared = { 1, 1 },
+    open = function()
+      vim.cmd("tab split")
+      return vim.api.nvim_get_current_win()
+    end,
+  },
+  {
+    name = "a float of the rendered buffer",
+    levels = { 1, 1 },
+    copied = { 2, 1 },
+    cleared = { 1, 1 },
+    open = function(buf)
+      return vim.api.nvim_open_win(buf, false, float_config)
+    end,
+  },
+  {
+    -- 3 is above the raised level, so the split copies the user's own 3.
+    name = "a window split off a window at a local 3",
+    levels = { 3, 0 },
+    copied = { 3, 0 },
+    cleared = { 3, 0 },
+    open = function()
+      vim.cmd("split")
+      return vim.api.nvim_get_current_win()
+    end,
+  },
+  {
+    -- As a vimrc sets it: 2 everywhere, which the clear must not lower.
+    name = "a window split off a window at a global 2",
+    levels = { 2, 2 },
+    copied = { 2, 2 },
+    cleared = { 2, 2 },
+    open = function()
+      vim.cmd("split")
+      return vim.api.nvim_get_current_win()
+    end,
+  },
+}) do
+  h.test("clearing leaves the window's own conceallevel to " .. case.name, function()
+    with_rendered_window(case.levels, function(_, buf)
+      local label = case.name .. ": "
+      local opened = case.open(buf)
+      h.assert_deep_eq(label .. "the window runs at the copied level", conceallevels(opened), case.copied)
+
+      require("markdown-table-wrap").close_preview()
+      h.assert_false(label .. "the rendering is cleared", require("markdown-table-wrap.inline").is_active(buf))
+      h.assert_deep_eq(label .. "clearing leaves the window at its own level", conceallevels(opened), case.cleared)
+    end)
+  end)
+end
+
+h.test("clearing sets a copied window to its own global conceallevel, not the clearing window's", function()
+  with_rendered_window({ 0, 0 }, function(win)
+    vim.cmd("split")
+    local copied = vim.api.nvim_get_current_win()
+    vim.cmd("setglobal conceallevel=1")
+    h.assert_deep_eq("the split runs at the raised level over its own global 1", conceallevels(copied), { 2, 1 })
+
+    vim.api.nvim_set_current_win(win)
+    require("markdown-table-wrap").close_preview()
+    h.assert_deep_eq("the split goes to its own global level", conceallevels(copied), { 1, 1 })
+    h.assert_deep_eq("the clearing window gets its level back", conceallevels(win), { 0, 0 })
+  end)
+end)
+
+-- Each open(win) returns a window showing another buffer, in or opened from
+-- the rendered window while the table stays rendered.
+for _, case in ipairs({
+  {
+    name = "another file edited in the rendered window",
+    open = function(win)
+      vim.cmd.edit(vim.fn.tempname())
+      return win
+    end,
+  },
+  {
+    name = "a :new window opened from the rendered window",
+    open = function()
+      vim.cmd("new")
+      return vim.api.nvim_get_current_win()
+    end,
+  },
+  {
+    name = "a float of another buffer entered from the rendered window",
+    open = function()
+      return vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), true, float_config)
+    end,
+  },
+  {
+    name = "a float of another buffer opened from the rendered window without entering it",
+    open = function()
+      return vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), false, float_config)
+    end,
+  },
+}) do
+  h.test(case.name .. " runs at the user's conceallevel", function()
+    with_rendered_window({ 1, 1 }, function(win, buf)
+      local label = case.name .. ": "
+      local other = case.open(win)
+      h.assert_true(label .. "the table stays rendered", require("markdown-table-wrap.inline").is_active(buf))
+      h.assert_true(label .. "the window shows another buffer", vim.api.nvim_win_get_buf(other) ~= buf)
+      h.assert_deep_eq(label .. "the other buffer runs at the user's level", conceallevels(other), { 1, 1 })
+      h.assert_eq(label .. "the rendered window's global level is untouched", conceallevels(win)[2], 1)
+    end)
+  end)
+end
+
+-- The rendered window leaves the buffer while it stays rendered, a split of it
+-- clears the rendering, and the rendered window comes back to the buffer.
+local function come_back_after_a_clear_elsewhere(win, buf)
+  vim.cmd("vsplit")
+  local clearing = vim.api.nvim_get_current_win()
+  vim.api.nvim_set_current_win(win)
+  vim.cmd("buffer " .. vim.api.nvim_create_buf(false, true))
+  vim.api.nvim_set_current_win(clearing)
+  require("markdown-table-wrap").close_preview()
+  vim.api.nvim_set_current_win(win)
+  vim.cmd("buffer " .. buf)
+  return win
+end
+
+-- Each arrange(win, buf) clears the rendering and returns a window that shows
+-- buf afterwards, starting from the raised level a window left stored with buf
+-- while it was rendered.
+for _, case in ipairs({
+  {
+    -- The split stores its raised level with the buffer when it leaves it, and
+    -- Neovim hands that to a window that never showed the buffer.
+    name = "a new window after a split left the buffer and closed",
+    levels = { 1, 1 },
+    shown = { 1, 1 },
+    arrange = function(_, buf)
+      vim.cmd("split")
+      vim.cmd("buffer " .. vim.api.nvim_create_buf(false, true))
+      vim.cmd("close")
+      require("markdown-table-wrap").close_preview()
+      vim.cmd("new")
+      vim.cmd("buffer " .. buf)
+      return vim.api.nvim_get_current_win()
+    end,
+  },
+  {
+    name = "the rendered window coming back after another window cleared the buffer",
+    levels = { 1, 1 },
+    shown = { 1, 1 },
+    arrange = come_back_after_a_clear_elsewhere,
+  },
+  {
+    name = "the rendered window at a local 1 coming back after another window cleared the buffer",
+    levels = { 1, 0 },
+    shown = { 1, 0 },
+    arrange = come_back_after_a_clear_elsewhere,
+  },
+  {
+    name = "the rendered window at a local 1 under a global 2 coming back after another window cleared the buffer",
+    levels = { 1, 2 },
+    shown = { 1, 2 },
+    arrange = come_back_after_a_clear_elsewhere,
+  },
+}) do
+  h.test("a window showing a cleared buffer runs at the user's conceallevel: " .. case.name, function()
+    with_rendered_window(case.levels, function(win, buf)
+      local label = case.name .. ": "
+      local shown = case.arrange(win, buf)
+      h.assert_false(label .. "the rendering is cleared", require("markdown-table-wrap.inline").is_active(buf))
+      h.assert_eq(label .. "the window shows the buffer", vim.api.nvim_win_get_buf(shown), buf)
+      h.assert_deep_eq(label .. "the window runs at the user's level", conceallevels(shown), case.shown)
+    end)
+  end)
+end
+
+-- Each change(win, buf), where given, runs while the table is rendered in win.
+for _, case in ipairs({
+  {
+    name = "a local level set before the rendering",
+    levels = { 1, 0 },
+    cleared = { 1, 0 },
+  },
+  {
+    -- 2 needs no raise, but it is still the user's own, unlike the 2 a
+    -- window copies from a rendered one.
+    name = "a local 2 set before the rendering",
+    levels = { 2, 0 },
+    cleared = { 2, 0 },
+  },
+  {
+    name = "a local 1 set before the rendering under a global 2",
+    levels = { 1, 2 },
+    cleared = { 1, 2 },
+  },
+  {
+    name = "a global level set during the rendering",
+    levels = { 1, 0 },
+    cleared = { 1, 3 },
+    change = function()
+      vim.cmd("setglobal conceallevel=3")
+    end,
+  },
+  {
+    -- :setglobal leaves the local level alone, also where it was equal.
+    name = "a global level set during the rendering over an equal local level",
+    levels = { 0, 0 },
+    cleared = { 0, 3 },
+    change = function()
+      vim.cmd("setglobal conceallevel=3")
+    end,
+  },
+  {
+    name = "a local level above 2 set during the rendering",
+    levels = { 1, 1 },
+    cleared = { 3, 1 },
+    change = function()
+      vim.cmd("setlocal conceallevel=3")
+    end,
+  },
+  {
+    -- The cursor move raises it again; the lowered level is the user's latest
+    -- choice, not the level from before the rendering.
+    name = "a local level below 2 set during the rendering",
+    levels = { 1, 0 },
+    cleared = { 0, 0 },
+    change = function(win, buf)
+      vim.cmd("setlocal conceallevel=0")
+      vim.api.nvim_exec_autocmds("CursorMoved", { buffer = buf })
+      h.assert_deep_eq("the cursor move raises the local level again", conceallevels(win), { 2, 0 })
+    end,
+  },
+}) do
+  h.test("clearing hands the rendered window back " .. case.name, function()
+    with_rendered_window(case.levels, function(win, buf)
+      if case.change then
+        case.change(win, buf)
+      end
+      require("markdown-table-wrap").close_preview()
+      h.assert_deep_eq(case.name .. ": clearing leaves the user's levels", conceallevels(win), case.cleared)
+    end)
+  end)
+end
+
+h.test("a 2 set in a window showing a cleared buffer stays while the window keeps showing it", function()
+  with_rendered_window({ 1, 1 }, function(win, buf)
+    require("markdown-table-wrap").close_preview()
+    vim.cmd("setlocal conceallevel=2")
+
+    vim.cmd("new")
+    vim.api.nvim_set_current_win(win)
+    h.assert_deep_eq("WinEnter keeps the 2 set in the window", conceallevels(win), { 2, 1 })
+
+    vim.api.nvim_exec_autocmds("CursorMoved", { buffer = buf })
+    h.assert_deep_eq("a cursor move keeps the 2 set in the window", conceallevels(win), { 2, 1 })
+
+    vim.cmd("new")
+    vim.cmd("buffer " .. buf)
+    h.assert_deep_eq("another window showing the buffer keeps the 2 set in the window", conceallevels(win), { 2, 1 })
+  end)
+end)
+
+h.test("closing a rendered window stores its own conceallevel with the buffer", function()
+  with_rendered_window({ 1, 0 }, function(win, buf)
+    vim.cmd("vnew")
+    local other = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_close(win, true)
+    require("markdown-table-wrap.inline").clear(buf)
+
+    -- Not a check on the closed window, whose options go with it: Neovim
+    -- hands them to the next window that shows its buffer.
+    vim.cmd("buffer " .. buf)
+    h.assert_deep_eq(
+      "the next window shows the buffer at the closed window's own level",
+      conceallevels(other),
+      { 1, 0 }
+    )
+  end)
+end)
+
+h.test("closing a window on another buffer stores the 2 set for that buffer", function()
+  with_rendered_window({ 1, 1 }, function()
+    vim.cmd("new")
+    local opened = vim.api.nvim_get_current_win()
+    local buf_new = vim.api.nvim_get_current_buf()
+    vim.cmd("setlocal conceallevel=2")
+    vim.api.nvim_win_close(opened, true)
+
+    vim.cmd("split")
+    vim.cmd("buffer " .. buf_new)
+    h.assert_deep_eq("the buffer comes back with the 2 set for it", conceallevels(0), { 2, 1 })
+  end)
+end)
+
+h.test("a clear after a Visual mode clear still hands the conceallevel back", function()
+  with_rendered_window({ 1, 1 }, function(win, buf)
+    -- What ModeChanged runs on entering Visual mode.
+    require("markdown-table-wrap.inline").clear(buf, { keep_window = true })
+    h.assert_deep_eq("the Visual mode clear keeps the raised level", conceallevels(win), { 2, 1 })
+
+    require("markdown-table-wrap").close_preview()
+    h.assert_deep_eq("the clear after it hands the user's level back", conceallevels(win), { 1, 1 })
+  end)
+end)
+
+-- render_all both ways: one renders through show(), the other through
+-- show_many().
+for _, render_all in ipairs({ true, false }) do
+  h.test(
+    "an Inline insert mode rendering leaves the window's conceallevel alone, render_all = " .. tostring(render_all),
+    function()
+      with_rendered_window({ 2, 0 }, function(win, buf)
+        local label = "render_all = " .. tostring(render_all) .. ": "
+        require("markdown-table-wrap").close_preview()
+        h.assert_deep_eq(label .. "the clear leaves the local 2", conceallevels(win), { 2, 0 })
+
+        vim.cmd("buffer " .. vim.api.nvim_create_buf(false, true))
+        vim.cmd("buffer " .. buf)
+        h.assert_deep_eq(label .. "showing the buffer again leaves the local 2", conceallevels(win), { 2, 0 })
+      end, { inline_mode = "insert", render_all = render_all })
+    end
+  )
+end
+
 h.test("BufWipeout disposes all per-buffer runtime state", function()
   local plugin = require("markdown-table-wrap")
 

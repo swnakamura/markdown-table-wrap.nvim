@@ -669,7 +669,7 @@ local function create_autocmds()
     group = M.state.augroup,
     callback = function(args)
       local inline = require("markdown-table-wrap.inline")
-      inline.attach_window(args.buf)
+      inline.attach_window(args.buf, args.event == "BufWinEnter")
       inline.update_reveal(args.buf)
     end,
   })

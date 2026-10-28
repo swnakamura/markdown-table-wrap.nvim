@@ -3,7 +3,12 @@ local render = require("markdown-table-wrap.render")
 local M = {}
 
 local namespace = vim.api.nvim_create_namespace("markdown-table-wrap")
+-- saved_conceallevels[winid][bufnr]: the window's local conceallevel on the
+-- buffer when the rendering started or raised it.
 local saved_conceallevels = {}
+-- Not active_buffers: a keep_window clear empties that while the windows keep
+-- the raised conceallevel, which a later clear still has to hand back.
+local raised_buffers = {}
 local active_buffers = {}
 local active_configs = {}
 -- Buffers currently rendered by the row-anchored replace mode (see the block
@@ -163,18 +168,35 @@ local function ensure_highlights(config)
   require("markdown-table-wrap.theme").apply(config)
 end
 
-local function set_render_window(winid)
+local function window_conceallevel(winid, scope)
+  return vim.api.nvim_get_option_value("conceallevel", { scope = scope, win = winid })
+end
+
+-- Never through vim.wo, which sets the window's global value as well: every
+-- other buffer later shown in the window, and every window opened from it,
+-- would start at the raised level.
+local function set_window_conceallevel(winid, level)
+  vim.api.nvim_set_option_value("conceallevel", level, { scope = "local", win = winid })
+end
+
+-- starting: the rendering starts, right after a clear handed every window its
+-- level back, so the local level is the user's own and is saved even at 2 or
+-- above. Not on a later attach, where a local 2 is the raised one. Not only
+-- where it differs from the global value: a :setglobal during the rendering
+-- leaves the local level alone in Neovim too.
+local function set_render_window(winid, bufnr, starting)
   winid = winid or vim.api.nvim_get_current_win()
   if not vim.api.nvim_win_is_valid(winid) then
     return
   end
 
-  local current = vim.wo[winid].conceallevel
-  if current < 2 then
-    if saved_conceallevels[winid] == nil then
-      saved_conceallevels[winid] = current
-    end
-    vim.wo[winid].conceallevel = 2
+  local level = window_conceallevel(winid, "local")
+  if level < 2 or starting then
+    saved_conceallevels[winid] = saved_conceallevels[winid] or {}
+    saved_conceallevels[winid][bufnr] = level
+  end
+  if level < 2 then
+    set_window_conceallevel(winid, 2)
   end
 
   -- 'concealcursor' is left untouched: the cursor line keeps unconcealing
@@ -184,23 +206,33 @@ local function set_render_window(winid)
   -- row has to soft-wrap like any other line.
 end
 
-local function set_render_for_buffer(bufnr)
+local function set_render_for_buffer(bufnr, starting)
+  if starting then
+    raised_buffers[bufnr] = true
+    vim.b[bufnr].markdown_table_wrap_rendered = true
+  end
   for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
-    set_render_window(winid)
+    set_render_window(winid, bufnr, starting)
   end
 end
 
-local function restore_render_window(winid)
-  local previous = saved_conceallevels[winid]
-  if previous ~= nil and vim.api.nvim_win_is_valid(winid) then
-    vim.wo[winid].conceallevel = previous
+local function restore_render_window(winid, bufnr)
+  local saved = saved_conceallevels[winid]
+  local level = saved and saved[bufnr]
+  if saved then
+    saved[bufnr] = nil
   end
-  saved_conceallevels[winid] = nil
+  -- Not any other level, which was set after the raise and is the user's. Not
+  -- a level from before the rendering for a window without a saved one: a
+  -- split or a float copied the raised level and never had one of its own.
+  if vim.api.nvim_win_is_valid(winid) and window_conceallevel(winid, "local") == 2 then
+    set_window_conceallevel(winid, level or window_conceallevel(winid, "global"))
+  end
 end
 
 local function restore_render_for_buffer(bufnr)
   for _, winid in ipairs(vim.fn.win_findbuf(bufnr)) do
-    restore_render_window(winid)
+    restore_render_window(winid, bufnr)
   end
 end
 
@@ -656,13 +688,22 @@ function M.clear(bufnr, opts)
   active_configs[bufnr] = nil
   aligned_tables[bufnr] = nil
   if not opts.keep_window then
-    restore_render_for_buffer(bufnr)
+    if raised_buffers[bufnr] then
+      restore_render_for_buffer(bufnr)
+    end
+    raised_buffers[bufnr] = nil
   end
 end
 
 function M.detach_window(winid)
   winid = winid or vim.api.nvim_get_current_win()
-  restore_render_window(winid)
+  if vim.api.nvim_win_is_valid(winid) then
+    local bufnr = vim.api.nvim_win_get_buf(winid)
+    if raised_buffers[bufnr] then
+      restore_render_window(winid, bufnr)
+    end
+  end
+  saved_conceallevels[winid] = nil
 end
 
 function M.dispose(bufnr)
@@ -702,7 +743,7 @@ function M.show(bufnr, table_info, config)
   active_buffers[bufnr] = true
   active_configs[bufnr] = config
   if config.inline_mode == "replace" then
-    set_render_for_buffer(bufnr)
+    set_render_for_buffer(bufnr, true)
   end
   M.update_reveal(bufnr)
   return rendered
@@ -725,16 +766,24 @@ function M.show_many(bufnr, tables, config)
   active_buffers[bufnr] = #tables > 0
   active_configs[bufnr] = config
   if config.inline_mode == "replace" then
-    set_render_for_buffer(bufnr)
+    set_render_for_buffer(bufnr, true)
   end
   M.update_reveal(bufnr)
   return rendered
 end
 
-function M.attach_window(bufnr)
+-- shown: bufnr has just been displayed in the current window (BufWinEnter).
+function M.attach_window(bufnr, shown)
   bufnr = normalize_bufnr(bufnr)
   if active_buffers[bufnr] and (active_configs[bufnr] or {}).inline_mode == "replace" then
     set_render_for_buffer(bufnr)
+  elseif shown and vim.b[bufnr].markdown_table_wrap_rendered then
+    -- Not on WinEnter or a cursor move, where a 2 in the window is the user's.
+    -- A 2 that comes with the buffer can be the raised level Neovim stored
+    -- when a window left it or closed showing it; a 2 the user set is reset
+    -- too when the buffer is displayed again or reloaded with :edit, since
+    -- nothing tells the two apart.
+    restore_render_window(vim.api.nvim_get_current_win(), bufnr)
   end
 end
 
