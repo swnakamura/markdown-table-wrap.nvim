@@ -15,7 +15,7 @@ upstream v1.0 (Reader-first); single upstream features are ported instead.
 | Remove Reader (cc548c8), legacy overlay + Neovim 0.11 (6f516eb), test-prune pass, `below` fix (d37afbd), remove map_gx (a6d38da), tests for untested behaviour (69fdfde), docs (fd03807) | done |
 | G1: adjacent tables drawn together, upper above lower (42c80dc) | done |
 | F: conceallevel raised locally and handed back without leaks (437fafd) | done |
-| G2: render_all = false drift after an edit that keeps the table text (changedtick in table_signature) | in progress |
+| G2: render_all = false drift after an edit that keeps the table text (changedtick in table_signature, 70f04b8) | done |
 | I: between an edit and the debounced refresh, update_reveal re-anchors blocks with render-time row numbers (header drawn under the table while typing above it; `Invalid 'line': out of range` after `dgg`). Owner decision (Q1, 2026-10-28): option B — do not re-anchor while the buffer's changedtick differs from the rendering's; the shifted rendering stays correct because the marks move with the text; residual: a table row split with `<CR>` stays partly hidden until the refresh | next |
 | H: in Visual mode, show only the tables inside the selection raw | after I |
 
@@ -36,7 +36,7 @@ One line per item: origin — content — disposition (empty while open) — dat
 - Task D review — link_icon iterates `link.custom` with pairs(); two patterns matching one URL can pick a different icon per run — — 2026-10-27
 - Task D review — quarto/rmd buffers (no Tree-sitter by default) open a table link only from its URL text — dropped: owner works in markdown — 2026-10-27
 - Task D re-review — README/help "with the cursor on the URL, it opens the URL" does not hold where gx falls back to <cfile> (URL with parentheses cut at '(') — — 2026-10-27
-- Task C review — insert-mode dim marks drift after `ddP` — moved into G2 (in progress) — 2026-10-28
+- Task C review — insert-mode dim marks drift after `ddP` — fixed: 70f04b8 — 2026-10-28
 - Task C review — help/README default blocks showed wrong auto_preview_in_insert / clear_on_insert — fixed: fd03807 — 2026-10-28
 - Task C review — inline_position is not part of the render signatures (only a direct M.config edit would leave a stale anchor) — dropped: setup() re-renders — 2026-10-28
 - Task D review — the "leftover map_gx" test checks only buffers never shown in a window — dropped: no gx handling remains — 2026-10-27
@@ -55,3 +55,6 @@ One line per item: origin — content — disposition (empty while open) — dat
 - F review — `:bdelete` of a rendered buffer leaves it marked active, so `:buffer A` raises conceallevel with nothing rendered (same before F) — — 2026-10-28
 - F re-review — no test pins that the cursor-move repair saves a lowered level equal to the global value (mutant R02) — — 2026-10-28
 - F re-review — CHANGELOG F entry omits the setlocal-2-before-first-render case and noautocmd pickups — — 2026-10-28
+- G2 review — no test pins that render_all = false skips the re-render on a cursor move (a signature that changes on every call passes the suite; checked only by measurement: `jjkk` renders 0 times) — — 2026-10-28
+- G2 review — render_all = false with clear_on_visual = false: an edit followed by `v` within the debounce leaves the drift after `<Esc>` until the next cursor move (the debounced refresh returns in Visual mode and ModeChanged returns early when clear_on_visual is false; same before G2) — — 2026-10-28
+- G2 review — clear_on_cursor_leave = false: an edit made while another window is current (`win_execute`, an LSP edit) stays drawn wrongly until the user returns to the rendered window (refresh_auto refreshes only the current buffer; same before G2) — — 2026-10-28
