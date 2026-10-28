@@ -76,6 +76,18 @@ function M.screen_line(row, gutter)
   return (table.concat(cells):gsub("%s+$", ""))
 end
 
+-- Every extmark of namespace `ns` in `bufnr` with its details, ids left out:
+-- a re-render legitimately allocates new ids.
+function M.extmarks(bufnr, ns)
+  local result = {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, { details = true })) do
+    local details = mark[4] or {}
+    details.ns_id = nil
+    table.insert(result, { mark[2], mark[3], details })
+  end
+  return result
+end
+
 function M.with_buffer(lines, fn)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_set_current_buf(buf)

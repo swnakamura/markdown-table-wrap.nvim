@@ -93,6 +93,50 @@ h.test("repeated setup invalidates refreshes from the previous setup epoch", fun
   end)
 end)
 
+-- ddP and ddkp put a deleted row back where it was: the table's text and line
+-- numbers end up as before, but the deleted row's extmarks have moved onto
+-- its neighbour by then (replace mode's conceal_lines, insert mode's dimming).
+for _, inline_mode in ipairs({ "replace", "insert" }) do
+  h.test("render_all = false redraws a table whose row was deleted and put back, " .. inline_mode, function()
+    local plugin = require("markdown-table-wrap")
+    local inline = require("markdown-table-wrap.inline")
+    plugin.setup({ preview_mode = "inline", inline_mode = inline_mode, render_all = false, debounce_ms = 1 })
+
+    local lines = {
+      "intro",
+      "",
+      "| A | B |",
+      "| --- | --- |",
+      "| one | two |",
+      "| three | four |",
+      "| five | six |",
+      "",
+      "outro",
+    }
+    h.with_buffer(lines, function(buf)
+      vim.bo[buf].filetype = "markdown"
+      vim.api.nvim_win_set_cursor(0, { 6, 0 })
+      plugin.refresh_auto()
+      local before = h.extmarks(buf, inline.namespace())
+
+      for _, keys in ipairs({ "ddP", "ddkp" }) do
+        local label = inline_mode .. ", " .. keys .. ": "
+        vim.cmd.normal({ keys, bang = true })
+        h.assert_deep_eq(label .. "the edit puts the text back", vim.api.nvim_buf_get_lines(buf, 0, -1, false), lines)
+        vim.api.nvim_exec_autocmds("TextChanged", { buffer = buf })
+        h.drain_timers(1)
+        h.assert_deep_eq(
+          label .. "the refresh after the edit draws what was drawn before it",
+          h.extmarks(buf, inline.namespace()),
+          before
+        )
+      end
+
+      inline.clear(buf)
+    end)
+  end)
+end
+
 h.test("interactive mode and auto choices stay buffer local", function()
   local plugin = require("markdown-table-wrap")
   local inline = require("markdown-table-wrap.inline")

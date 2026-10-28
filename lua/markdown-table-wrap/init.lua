@@ -240,6 +240,9 @@ end
 local function table_signature(bufnr, table_info, config)
   local lines = vim.api.nvim_buf_get_lines(bufnr, table_info.start_lnum - 1, table_info.end_lnum, false)
   return table.concat({
+    -- Not the text and line numbers alone: an edit that puts them back as
+    -- they were (ddP) still moves the extmarks of the rendering.
+    tostring(vim.api.nvim_buf_get_changedtick(bufnr)),
     tostring(table_info.start_lnum),
     tostring(table_info.end_lnum),
     tostring(vim.api.nvim_win_get_width(0)),

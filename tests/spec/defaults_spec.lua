@@ -180,16 +180,8 @@ h.test("default setup re-renders a refreshed table in place of the old rendering
   -- it out made this the slowest test of the suite.
   plugin.setup({ debounce_ms = 1 })
 
-  -- Every extmark of the plugin namespace with its details, ids left out: a
-  -- re-render legitimately allocates new ids.
   local function snapshot(bufnr)
-    local result = {}
-    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, inline.namespace(), 0, -1, { details = true })) do
-      local details = mark[4] or {}
-      details.ns_id = nil
-      table.insert(result, { mark[2], mark[3], details })
-    end
-    return result
+    return h.extmarks(bufnr, inline.namespace())
   end
 
   h.with_buffer({
