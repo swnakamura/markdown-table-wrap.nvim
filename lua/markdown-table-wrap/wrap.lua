@@ -7,17 +7,24 @@ local break_chars = {
   [" "] = true,
   ["\t"] = true,
   ["　"] = true,
-  ["、"] = true,
-  ["，"] = true,
-  ["。"] = true,
-  ["！"] = true,
-  ["？"] = true,
-  ["："] = true,
   [","] = true,
-  ["；"] = true,
   [";"] = true,
   ["/"] = true,
 }
+
+-- Wide (CJK) text breaks between any two characters, as Japanese and Chinese
+-- typesetting does, instead of only after punctuation; these keep a closing
+-- mark off the start of a line and an opening one off the end.
+local function char_set(text)
+  local set = {}
+  for ch in utf8.iter(text) do
+    set[ch] = true
+  end
+  return set
+end
+
+local no_line_start = char_set("、。，．！？：；）」』】〕〉》］｝ー〜…・,.;:!?)]}")
+local no_line_end = char_set("（「『【〔〈《［｛([{")
 
 -- Inside inline code, a token too long for its column is split after one of
 -- these rather than at an arbitrary character.
@@ -181,6 +188,22 @@ local function expand_oversized_item(item, limit)
   return pieces
 end
 
+local function is_wide(item)
+  return item.kind ~= "code" and width.strwidth(item.text) > 1
+end
+
+-- Breaks are decided between two neighbours so a CJK pair can veto a break
+-- that the character on either side would otherwise allow.
+local function breaks_between(prev, item)
+  if no_line_start[item.text] or no_line_end[prev.text] then
+    return whitespace_chars[prev.text] == true
+  end
+  return break_chars[prev.text]
+    or (prev.kind == "code" and code_break_chars[prev.text])
+    or is_wide(prev)
+    or is_wide(item)
+end
+
 local function wrap_segment(chars, limit, lines)
   local current = {}
   local last_break = nil
@@ -190,6 +213,10 @@ local function wrap_segment(chars, limit, lines)
       if #current == 0 and whitespace_chars[item.text] then
         -- Never start a line with whitespace
         goto continue
+      end
+
+      if #current > 0 and breaks_between(current[#current], item) then
+        last_break = #current
       end
 
       -- Measured untrimmed: "word " is five cells wide even though a line
@@ -204,6 +231,9 @@ local function wrap_segment(chars, limit, lines)
           current = {}
         end
         last_break = nil
+        if #current > 0 and breaks_between(current[#current], item) then
+          last_break = #current
+        end
       end
 
       if #current == 0 and whitespace_chars[item.text] then
@@ -211,9 +241,6 @@ local function wrap_segment(chars, limit, lines)
       end
 
       table.insert(current, item)
-      if break_chars[item.text] or (item.kind == "code" and code_break_chars[item.text]) then
-        last_break = #current
-      end
 
       ::continue::
     end

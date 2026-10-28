@@ -45,9 +45,9 @@ h.test("wrap ends a line at a hard break and counts wide characters as two cells
   end, wrap.wrap_cell(markdown.parse_inline("中文中文<br>日本語English"), 8))
 
   h.assert_deep_eq(
-    "hard break, then an 8-cell fill with no break opportunity",
+    "hard break, then a break between CJK text and an English word",
     texts,
-    { "中文中文", "日本語En", "glish" }
+    { "中文中文", "日本語", "English" }
   )
 end)
 
@@ -79,13 +79,36 @@ h.test("wrap prefers punctuation boundaries and preserves link metadata", functi
   h.assert_eq("both pieces of the wrapped link keep the link span", link_spans, 2)
 end)
 
-h.test("wrap breaks after CJK sentence punctuation", function()
+h.test("wrap breaks CJK text between any characters except before closing and after opening marks", function()
   local markdown = require("markdown-table-wrap.markdown")
   local wrap = require("markdown-table-wrap.wrap")
-  for _, mark in ipairs({ "。", "！", "？", "：" }) do
-    local lines = wrap.wrap_cell(markdown.parse_inline("短い文" .. mark .. "とても長い次の文"), 12)
-    h.assert_eq("first line ends at " .. mark, lines[1].text, "短い文" .. mark)
+  local function texts(text, limit)
+    return vim.tbl_map(function(line)
+      return line.text
+    end, wrap.wrap_cell(markdown.parse_inline(text), limit))
   end
+
+  h.assert_deep_eq(
+    "fills past punctuation",
+    texts("短い文。とても長い次の文", 12),
+    { "短い文。とて", "も長い次の文" }
+  )
+  h.assert_deep_eq(
+    "keeps an English word whole",
+    texts("Neovimのプラグインを書く", 10),
+    { "Neovimのプ", "ラグインを", "書く" }
+  )
+  h.assert_deep_eq(
+    "carries a character down with a closing mark",
+    texts("あいうえおかきくけこ。", 10),
+    { "あいうえお", "かきくけ", "こ。" }
+  )
+  h.assert_deep_eq(
+    "carries an opening mark down",
+    texts("あいうえ「かきく」", 10),
+    { "あいうえ", "「かきく」" }
+  )
+  h.assert_deep_eq("breaks between an English word and CJK text", texts("Vimで。", 5), { "Vim", "で。" })
 end)
 
 h.test("wrap never emits blank lines", function()
