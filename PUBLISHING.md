@@ -222,7 +222,7 @@ the two intentional default changes prominently:
 
 The real media currently tracked in this repository are:
 
-- `docs/01-inline-tokyonight.png`
+- `docs/inline-cursor-row.png`
 - `docs/03-floating-long-table.png`
 
 Use only those files unless new media is committed and reviewed first. The

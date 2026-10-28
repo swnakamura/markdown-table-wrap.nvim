@@ -16,7 +16,7 @@ It does not modify the Markdown source buffer and does not fork or patch `render
 
 Inline rendering with the default `opts = {}`. The cursor is on the third row, which is shown as raw Markdown so it can be edited; the other rows stay rendered and wrap inside their cells:
 
-![Inline table rendering with the cursor row revealed](docs/01-inline-tokyonight.png)
+![Inline table rendering with the cursor row revealed](docs/inline-cursor-row.png)
 
 Floating preview for long table reading:
 
@@ -576,7 +576,7 @@ markdown-table-wrap.nvim/
 │   ├── markdown-table-wrap.txt
 │   └── tags
 ├── docs/
-│   ├── 01-inline-tokyonight.png
+│   ├── inline-cursor-row.png
 │   └── 03-floating-long-table.png
 ├── lua/
 │   └── markdown-table-wrap/
